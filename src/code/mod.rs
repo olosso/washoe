@@ -53,6 +53,9 @@ impl fmt::Display for Instructions {
             let operand_count = def.operand_widths.len();
 
             let msg = match operand_count {
+                0 => {
+                    format!("{}", def.name)
+                }
                 1 => {
                     format!("{} {}", def.name, operands[0])
                 }
@@ -73,7 +76,14 @@ impl fmt::Display for Instructions {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)] // Forces Rust to store a Opcode in one byte
 pub enum Opcode {
-    Constant,
+    Constant = 0,
+    Add = 1,
+}
+
+impl fmt::Display for Opcode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", DEFINITIONS.get(self).unwrap().name)
+    }
 }
 
 /*
@@ -87,7 +97,8 @@ impl TryFrom<u8> for Opcode {
     fn try_from(byte: u8) -> Result<Self, Self::Error> {
         match byte {
             0 => Ok(Self::Constant),
-            _ => Err("No Opcode corresponding for byte found."),
+            1 => Ok(Self::Add),
+            _ => Err("No Opcode corresponding to byte found."),
         }
     }
 }
@@ -122,7 +133,8 @@ lazy_static! {
             name: "OpConstant",
             operand_widths: &[2], // This means that the constant pool is allowed 65536 Objects.
         },
-    )]);
+    ), (Opcode::Add, Definition { name: "OpAdd", operand_widths: &[] })
+    ]);
 }
 
 /*
@@ -169,8 +181,7 @@ pub fn read_operands(def: &Definition, ins: &[u8]) -> (Vec<u16>, usize) {
     for ow in def.operand_widths {
         match ow {
             2 => {
-                let bytes = [ins[offset], ins[offset + 1]];
-                operands.push(u16::from_be_bytes(bytes));
+                operands.push(read_uint16(ins, offset));
             }
             _ => todo!(),
         }
@@ -179,6 +190,11 @@ pub fn read_operands(def: &Definition, ins: &[u8]) -> (Vec<u16>, usize) {
     }
 
     (operands, offset)
+}
+
+pub fn read_uint16(ins: &[u8], offset: usize) -> u16 {
+    let bytes = [ins[offset], ins[offset + 1]];
+    u16::from_be_bytes(bytes)
 }
 
 #[cfg(test)]
@@ -193,11 +209,18 @@ mod tests {
             expected: &'case [u8],
         };
 
-        let cases = [Case {
-            op: Opcode::Constant,
-            operands: &[65534],
-            expected: &[Opcode::Constant as u8, 255, 254],
-        }];
+        let cases = [
+            Case {
+                op: Opcode::Constant,
+                operands: &[65534],
+                expected: &[Opcode::Constant as u8, 255, 254],
+            },
+            Case {
+                op: Opcode::Add,
+                operands: &[],
+                expected: &[Opcode::Add as u8],
+            },
+        ];
 
         for case in cases {
             let instruction = make(case.op, case.operands);
@@ -217,11 +240,13 @@ mod tests {
             &make(Constant, &[1])[..],
             &make(Constant, &[2])[..],
             &make(Constant, &[65535])[..],
+            &make(Add, &[])[..],
         ];
 
         let expected = "0000 OpConstant 1
 0003 OpConstant 2
 0006 OpConstant 65535
+0009 OpAdd
 ";
 
         let concatted = Instructions::new(instructions.concat());

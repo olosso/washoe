@@ -2,12 +2,15 @@ use crate::ast;
 use crate::ast::{Expression, Statement};
 use crate::code::{self, Instructions, Opcode};
 use crate::object::Object;
+use crate::object::Object::*;
+use ast::Expression::*;
+use ast::Statement::*;
 
 /*
  * @COMPILER::COMPILER
  */
-#[derive(Default)]
-struct Compiler {
+#[derive(Default, Debug)]
+pub struct Compiler {
     instructions: code::Instructions,
     constants: Vec<Object>,
 }
@@ -27,7 +30,6 @@ impl Compiler {
     }
 
     fn c_statement(&mut self, stmt: &Statement) {
-        use ast::Statement::*;
         match stmt {
             Expr(_, e) => self.c_expression(e),
             _ => todo!(),
@@ -35,17 +37,20 @@ impl Compiler {
     }
 
     fn c_expression(&mut self, expr: &Expression) {
-        use crate::object::Object::*;
-        use ast::Expression::*;
         match expr {
             IntegerLiteral(_, i) => {
                 let i = Integer(*i);
                 let pos = [self.add_constant(i) as u32];
-                println!("{}", self.emit(Opcode::Constant, &pos));
+                self.emit(Opcode::Constant, &pos);
             }
             Infix(_, l, op, r) => {
                 self.c_expression(l);
                 self.c_expression(r);
+
+                match op.as_str() {
+                    "+" => self.emit(Opcode::Add, &[]),
+                    _ => todo!(),
+                };
             }
             _ => todo!(),
         }
@@ -79,9 +84,9 @@ impl Compiler {
 /*
  * @COMPILER::BYTECODE
  */
-struct Bytecode {
-    instructions: code::Instructions,
-    constants: Vec<Object>,
+pub struct Bytecode {
+    pub instructions: code::Instructions,
+    pub constants: Vec<Object>,
 }
 
 #[cfg(test)]
@@ -104,10 +109,17 @@ mod tests {
 
     #[test]
     fn test_integer_arithmetic() {
+        use code::make;
         let cases = [CompilerCase {
-            input: "1 + 2",
-            expected_constants: vec![Integer(1), Integer(2)],
-            expected_instructions: &[code::make(Constant, &[0]), code::make(Constant, &[1])],
+            input: "3 + 2 + 5",
+            expected_constants: vec![Integer(3), Integer(2), Integer(5)],
+            expected_instructions: &[
+                make(Constant, &[0]),
+                make(Constant, &[1]),
+                make(Add, &[]),
+                make(Constant, &[2]),
+                make(Add, &[]),
+            ],
         }];
 
         test_compiler_cases(&cases);
@@ -141,7 +153,7 @@ mod tests {
         assert!(matches!(e, Object::Integer(..)));
         if let Object::Integer(i) = a {
             if let Object::Integer(j) = e {
-                assert_eq!(i, j);
+                assert_eq!(i, j, "Constant pool not the same");
             }
         }
     }
@@ -149,8 +161,15 @@ mod tests {
     fn test_instructions(actual: code::Instructions, expected: &[code::Instructions]) {
         let concat = concat_instructions(expected);
 
-        assert_eq!(actual.len(), concat.len());
-        assert!(actual.iter().eq(concat.iter()));
+        assert_eq!(
+            actual.len(),
+            concat.len(),
+            "Instruction lengths not the same"
+        );
+        assert!(
+            actual.iter().eq(concat.iter()),
+            "Instruction contents not the same"
+        );
     }
 
     fn concat_instructions(inss: &[code::Instructions]) -> code::Instructions {
