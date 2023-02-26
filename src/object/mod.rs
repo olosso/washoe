@@ -1,6 +1,7 @@
 use crate::ast::{Body, Expression, Node, Params, Statement};
 use crate::evaluator::EvalError;
 use core::cmp::PartialEq;
+use std::default::Default;
 use std::hash::{Hash, Hasher};
 use std::{collections::HashMap, ops::Deref};
 
@@ -34,6 +35,12 @@ pub enum Object {
     HashMap(HashMap<Self, Self>),
     Function(Vec<Expression>, Statement, Environment),
     Builtin(&'static str, fn(Vec<Self>) -> Result<Self, EvalError>),
+}
+
+impl Default for Object {
+    fn default() -> Self {
+        Object::Null
+    }
 }
 
 impl Hash for Object {
