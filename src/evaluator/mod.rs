@@ -118,7 +118,7 @@ fn eval_indexing(
     match arr {
         Object::Array(a) => {
             if let Object::Integer(int) = eval_expression(i, env)? {
-                return Ok(a.get(int as usize).unwrap().copy());
+                return Ok(a.get(int as usize).unwrap().clone());
             } else {
                 return Err(EvalError::new("Index must an IntegerLiteral".to_string()));
             };
@@ -131,7 +131,7 @@ fn eval_indexing(
             )) {
                 let val = hm.get(&i);
                 if let Some(x) = val {
-                    return Ok(x.copy());
+                    return Ok(x.clone());
                 } else {
                     return Ok(Object::Null);
                 }
@@ -373,7 +373,7 @@ pub fn eval_let(
 
 pub fn eval_identifier(name: &String, env: &Rc<Environment>) -> Result<Object, EvalError> {
     match env.get(name) {
-        Some(value) => Ok(value.copy()),
+        Some(value) => Ok(value.clone()),
         None => Err(EvalError::new(format!(
             "The symbol '{}' is not bound to any value.",
             &name

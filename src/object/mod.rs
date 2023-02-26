@@ -135,6 +135,36 @@ impl PartialEq for Object {
     }
 }
 
+impl Clone for Object {
+    fn clone(&self) -> Object {
+        match self {
+            Self::Null => Self::Null,
+            Self::Integer(i) => Self::Integer(*i),
+            Self::String(s) => Self::String(s.to_owned()),
+            Self::Boolean(b) => Self::Boolean(*b),
+            Self::Return(obj) => Self::Null, // TODO This is a quick fix. Not sure what to do.
+            Self::Function(params, body, env) => {
+                Self::Function(params.clone(), body.clone(), env.clone())
+            }
+            Self::Builtin(s, f) => panic!("Not allowed to copy Builtins"),
+            Self::Array(a) => {
+                let mut b = vec![];
+                for elem in a {
+                    b.push(elem.clone())
+                }
+                Self::Array(b)
+            }
+            Self::HashMap(a) => {
+                let mut b = HashMap::new();
+                for (k, v) in a {
+                    b.insert(k.clone(), v.clone());
+                }
+                Self::HashMap(b)
+            }
+        }
+    }
+}
+
 impl Eq for Object {}
 
 impl Object {
@@ -190,6 +220,18 @@ impl Object {
                 format!("{{ {} }}", s)
             }
         }
+    }
+
+    pub fn add(a: Object, b: Object) -> Result<Object, EvalError> {
+        let mut result = Err(EvalError::new("Can only add two integers.".to_string()));
+
+        if let Object::Integer(a) = a {
+            if let Object::Integer(b) = b {
+                result = Ok(Object::Integer(a + b));
+            }
+        }
+
+        result
     }
 
     /*
@@ -253,34 +295,6 @@ impl Object {
             Object::Boolean(b) => *b,
             Object::Null | Object::Integer(0) => false,
             _ => true,
-        }
-    }
-
-    pub fn copy(&self) -> Object {
-        match self {
-            Self::Null => Self::Null,
-            Self::Integer(i) => Self::Integer(*i),
-            Self::String(s) => Self::String(s.to_owned()),
-            Self::Boolean(b) => Self::Boolean(*b),
-            Self::Return(obj) => Self::Null, // TODO This is a quick fix. Not sure what to do.
-            Self::Function(params, body, env) => {
-                Self::Function(params.clone(), body.clone(), env.clone())
-            }
-            Self::Builtin(s, f) => panic!("Not allowed to copy Builtins"),
-            Self::Array(a) => {
-                let mut b = vec![];
-                for elem in a {
-                    b.push(elem.copy())
-                }
-                Self::Array(b)
-            }
-            Self::HashMap(a) => {
-                let mut b = HashMap::new();
-                for (k, v) in a {
-                    b.insert(k.copy(), v.copy());
-                }
-                Self::HashMap(b)
-            }
         }
     }
 
@@ -356,14 +370,14 @@ impl Environment {
     }
 
     pub fn add(&self, name: &str, obj: &Object) {
-        self.0.borrow_mut().insert(name.to_string(), obj.copy());
+        self.0.borrow_mut().insert(name.to_string(), obj.clone());
     }
 
     pub fn get(&self, name: &String) -> Option<Object> {
         let binding = self.0.borrow();
         let obj = binding.get(name);
         match obj {
-            Some(x) => Some(x.copy()),
+            Some(x) => Some(x.clone()),
             None => match &self.1 {
                 Some(env) => env.get(name),
                 None => None,
