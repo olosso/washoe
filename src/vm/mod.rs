@@ -1,5 +1,5 @@
 use crate::{
-    code::{read_uint16, Instructions, Opcode},
+    code::{read_uint16, Instructions, Op},
     compiler::Bytecode,
     object::Object,
 };
@@ -27,18 +27,25 @@ impl VM {
         }
     }
 
+    /*
+     * The VM executes the bytecode by getting instructions and constants from the compiler,
+     * and defining behaviour for the Opcodes that it supports. At runtime depending on the Opcode,
+     * data is pushed on the stack, and popped off the stack.
+     *
+     * If the stack size (in bytes) exceeds a predetermined limit, the VM will crash with a "stack overflow".
+     */
     pub fn run(&mut self) {
         let mut ip = 0;
-        while ip <= (self.instructions.len() - 1) {
-            let op = Opcode::try_from(self.instructions[ip]).unwrap();
+        while ip < self.instructions.len() {
+            let op = Op::try_from(self.instructions[ip]).unwrap();
 
             match op {
-                Opcode::Constant => {
+                Op::Constant => {
                     let const_index = read_uint16(&self.instructions, ip + 1);
                     ip += 2;
                     self.push(self.constants[const_index as usize].clone());
                 }
-                Opcode::Add => {
+                Op::Add => {
                     let b = self.pop();
                     let a = self.pop();
 
