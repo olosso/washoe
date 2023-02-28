@@ -1,6 +1,6 @@
 use crate::ast;
 use crate::ast::{Expression, Statement};
-use crate::code::{self, Instructions, Opcode};
+use crate::code::{self, Instructions, Op};
 use crate::object::Object;
 use crate::object::Object::*;
 use ast::Expression::*;
@@ -41,14 +41,14 @@ impl Compiler {
             IntegerLiteral(_, i) => {
                 let i = Integer(*i);
                 let pos = [self.add_constant(i) as u32];
-                self.emit(Opcode::Constant, &pos);
+                self.emit(Op::Constant, &pos);
             }
             Infix(_, l, op, r) => {
                 self.c_expression(l);
                 self.c_expression(r);
 
                 match op.as_str() {
-                    "+" => self.emit(Opcode::Add, &[]),
+                    "+" => self.emit(Op::Add, &[]),
                     _ => todo!(),
                 };
             }
@@ -61,7 +61,7 @@ impl Compiler {
         self.constants.len() - 1
     }
 
-    fn emit(&mut self, op: code::Opcode, operands: &[u32]) -> usize {
+    fn emit(&mut self, op: code::Op, operands: &[u32]) -> usize {
         let mut ins = code::make(op, operands);
         self.add_instruction(&mut ins)
     }
@@ -92,7 +92,7 @@ pub struct Bytecode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::code::{Instructions, Opcode::*};
+    use crate::code::{Instructions, Op::*};
     use crate::object::Object::*;
 
     fn parse(input: &str) -> crate::ast::Program {

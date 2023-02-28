@@ -46,7 +46,7 @@ impl fmt::Display for Instructions {
         let mut s = String::new();
         let mut i = 0;
         while i < self.len() {
-            let opcode = Opcode::try_from(self[i]).unwrap();
+            let opcode = Op::try_from(self[i]).unwrap();
             let def = DEFINITIONS.get(&opcode).unwrap();
             let (operands, n) = read_operands(def, &self.0[i + 1..]);
 
@@ -75,12 +75,12 @@ impl fmt::Display for Instructions {
  */
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)] // Forces Rust to store a Opcode in one byte
-pub enum Opcode {
+pub enum Op {
     Constant = 0,
     Add = 1,
 }
 
-impl fmt::Display for Opcode {
+impl fmt::Display for Op {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", DEFINITIONS.get(self).unwrap().name)
     }
@@ -91,7 +91,7 @@ impl fmt::Display for Opcode {
  * correspond to some Opcode.
  * This automatically implements TryInto<Opcode> for u8.
  */
-impl TryFrom<u8> for Opcode {
+impl TryFrom<u8> for Op {
     type Error = &'static str;
 
     fn try_from(byte: u8) -> Result<Self, Self::Error> {
@@ -122,18 +122,18 @@ pub struct Definition {
  * This HashMap contains all supported Opcodes and their operand widths.
  */
 lazy_static! {
-    pub static ref DEFINITIONS: HashMap<Opcode, Definition> = HashMap::from([(
+    pub static ref DEFINITIONS: HashMap<Op, Definition> = HashMap::from([(
         /*
          * The compiler will keep track of values that can be evaluated at compile time.
          * These are called constants, or statics. The operand of the Opcode isn't the value
          * of the constant, but an index.
          */
-        Opcode::Constant,
+        Op::Constant,
         Definition {
             name: "OpConstant",
             operand_widths: &[2], // This means that the constant pool is allowed 65536 Objects.
         },
-    ), (Opcode::Add, Definition { name: "OpAdd", operand_widths: &[] })
+    ), (Op::Add, Definition { name: "OpAdd", operand_widths: &[] })
     ]);
 }
 
@@ -145,7 +145,7 @@ lazy_static! {
  * 256 = 0x00000101 => select only the 2 last bytes => 0x0101 => [1, 1]
  * Combined we get [0, 1, 1], where [1, 1] should be interpreted as big endian.
  */
-pub fn make(op: Opcode, operands: &[u32]) -> Instructions {
+pub fn make(op: Op, operands: &[u32]) -> Instructions {
     let def = DEFINITIONS.get(&op).expect("Bad Opcode to make.");
 
     let instruction_len: usize = (1 + def.operand_widths.iter().sum::<u8>()).into();
@@ -204,21 +204,21 @@ mod tests {
     #[test]
     fn test_make() {
         struct Case<'case> {
-            op: Opcode,
+            op: Op,
             operands: &'case [u32],
             expected: &'case [u8],
         };
 
         let cases = [
             Case {
-                op: Opcode::Constant,
+                op: Op::Constant,
                 operands: &[65534],
-                expected: &[Opcode::Constant as u8, 255, 254],
+                expected: &[Op::Constant as u8, 255, 254],
             },
             Case {
-                op: Opcode::Add,
+                op: Op::Add,
                 operands: &[],
-                expected: &[Opcode::Add as u8],
+                expected: &[Op::Add as u8],
             },
         ];
 
@@ -235,7 +235,7 @@ mod tests {
 
     #[test]
     fn test_instruction_string() {
-        use Opcode::*;
+        use Op::*;
         let instructions = [
             &make(Constant, &[1])[..],
             &make(Constant, &[2])[..],
@@ -259,9 +259,9 @@ mod tests {
      * Test if we can go back and forth from bytes to operands.
      */
     fn test_read_operands() {
-        use Opcode::*;
+        use Op::*;
         struct Case<'operand> {
-            op: Opcode,
+            op: Op,
             operands: &'operand [u32],
             bytes_read: usize,
         }
