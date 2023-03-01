@@ -32,10 +32,11 @@ impl REPL {
                 Ok(program) => {
                     let mut compiler = Compiler::default();
                     compiler.compile(program);
-                    let mut vm = VM::new(compiler.bytecode());
+                    let mut stack = Stack::new();
+                    let mut vm = VM::new(compiler.bytecode(), &mut stack);
                     vm.run();
-                    let top = vm.stack_top().unwrap();
-                    println!("{top:?}",);
+                    let top = vm.last_popped_obj();
+                    println!("{top:?}");
                 }
                 Err(err) => println!("Eeeek, failed to parse program."),
             }

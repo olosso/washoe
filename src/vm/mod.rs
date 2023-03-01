@@ -1,3 +1,6 @@
+use std::mem::{self, MaybeUninit};
+use std::ops::{Deref, DerefMut};
+
 use crate::{
     code::{read_uint16, Instructions, Op},
     compiler::Bytecode,
@@ -5,24 +8,62 @@ use crate::{
 };
 
 /*
+ * @VM::STACK
+ */
+const STACK_SIZE: usize = 2usize.pow(10);
+#[derive(Debug)]
+pub struct Stack([Object; STACK_SIZE]);
+
+impl Stack {
+    pub fn new() -> Self {
+        let nulls = {
+            let mut data: [MaybeUninit<Object>; STACK_SIZE] =
+                unsafe { MaybeUninit::uninit().assume_init() };
+
+            // Dropping a `MaybeUninit` does nothing, so if there is a panic during this loop,
+            // we have a memory leak, but there is no memory safety issue.
+            for elem in &mut data[..] {
+                elem.write(Object::Null);
+            }
+
+            // Everything is initialized. Transmute the array to the
+            // initialized type.
+            unsafe { mem::transmute::<_, [Object; STACK_SIZE]>(data) }
+        };
+
+        Stack(nulls)
+    }
+}
+
+impl Deref for Stack {
+    type Target = [Object];
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+impl DerefMut for Stack {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+/*
  * @VM::VM
  */
 #[derive(Debug)]
-pub struct VM {
+pub struct VM<'stack> {
     constants: Vec<Object>,
     instructions: Instructions,
-    stack: Vec<Object>,
+    stack: &'stack mut Stack,
     sp: usize,
 }
 
-const STACK_SIZE: usize = 2usize.pow(10);
-
-impl VM {
-    pub fn new(bytecode: Bytecode) -> Self {
+impl<'stack> VM<'stack> {
+    pub fn new(bytecode: Bytecode, stack: &'stack mut Stack) -> Self {
         VM {
             constants: bytecode.constants,
             instructions: bytecode.instructions,
-            stack: Vec::with_capacity(STACK_SIZE),
+            stack,
             sp: 0,
         }
     }
@@ -58,27 +99,23 @@ impl VM {
         }
     }
 
-    fn push(&mut self, o: Object) {
+    fn push(&mut self, obj: Object) {
         if self.sp >= STACK_SIZE {
             panic!("Stack overflow.")
         }
 
-        self.stack.push(o);
+        self.stack[self.sp] = obj;
         self.sp += 1;
     }
 
-    fn pop(&mut self) -> Object {
-        let o = self.stack.pop().unwrap();
+    /// Objects aren't actually removed from the stack, the stack pointer is simply decremented.
+    fn pop(&mut self) -> &Object {
         self.sp -= 1;
-        o
+        &self.stack[self.sp]
     }
 
-    pub fn stack_top(&self) -> Option<&Object> {
-        if self.sp == 0 {
-            None
-        } else {
-            Some(&self.stack[self.sp - 1])
-        }
+    pub fn last_popped_obj(&self) -> &Object {
+        &self.stack[self.sp]
     }
 }
 
@@ -119,11 +156,12 @@ mod vm_tests {
                 // Generation
                 let mut compiler = Compiler::default();
                 compiler.compile(program);
-                let mut vm = VM::new(compiler.bytecode());
+                let mut stack = Stack::new();
+                let mut vm = VM::new(compiler.bytecode(), &mut stack);
                 vm.run();
 
                 // Confirmation
-                let top = vm.stack_top().unwrap();
+                let top = vm.last_popped_obj();
                 test_expected_object(top, &case.expected);
             }
         }
