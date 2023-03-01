@@ -89,6 +89,13 @@ impl<'stack> VM<'stack> {
                     // Push the Object corresponding to the index onto the stack.
                     self.push(self.constants[const_index as usize].clone());
                 }
+                Op::True | Op::False => {
+                    if op == Op::True {
+                        self.push(Object::Boolean(true))
+                    } else {
+                        self.push(Object::Boolean(false))
+                    }
+                }
                 Op::Add | Op::Sub | Op::Mul | Op::Div => {
                     let right = self.pop().clone();
                     let left = self.pop().clone();
@@ -157,6 +164,15 @@ mod vm_tests {
             }
         }
 
+        pub fn test_boolean_object(a: &Object, e: &Object) {
+            assert!(matches!(e, Object::Boolean(..)));
+            if let Object::Boolean(i) = a {
+                if let Object::Boolean(j) = e {
+                    assert_eq!(i, j);
+                }
+            }
+        }
+
         pub struct VMCase<'s> {
             pub input: &'s str,
             pub expected: Object,
@@ -182,11 +198,13 @@ mod vm_tests {
         pub fn test_expected_object(actual: &Object, expected: &Object) {
             use Object::*;
             match actual {
-                Integer(i) => test_integer_object(actual, expected),
+                Integer(_) => test_integer_object(actual, expected),
+                Boolean(_) => test_boolean_object(actual, expected),
                 _ => todo!(),
             }
         }
     }
+
     mod tests {
         use super::helpers::*;
         use super::*;
@@ -225,6 +243,22 @@ mod vm_tests {
                 VMCase {
                     input: "7 * 9 / 3",
                     expected: Integer(21),
+                },
+            ];
+
+            test_vm_run(&cases);
+        }
+
+        #[test]
+        fn test_boolean_eval() {
+            let cases = [
+                VMCase {
+                    input: "true",
+                    expected: Boolean(true),
+                },
+                VMCase {
+                    input: "false",
+                    expected: Boolean(false),
                 },
             ];
 

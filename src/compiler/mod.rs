@@ -37,6 +37,13 @@ impl Compiler {
 
     fn c_expression(&mut self, expr: &Expression) {
         match expr {
+            Bool(_, b) => {
+                if (*b) {
+                    self.emit(Op::True, None);
+                } else {
+                    self.emit(Op::False, None);
+                }
+            }
             IntegerLiteral(_, i) => {
                 let obj = Integer(*i);
                 let pos = [self.add_constant(obj) as u32];
@@ -182,6 +189,16 @@ mod tests {
                     make(Pop, None),
                 ],
             },
+            CompilerCase {
+                input: "true;",
+                expected_constants: vec![],
+                expected_instructions: &[make(True, None), make(Pop, None)],
+            },
+            CompilerCase {
+                input: "false",
+                expected_constants: vec![],
+                expected_instructions: &[make(False, None), make(Pop, None)],
+            },
         ];
 
         test_compiler_cases(&cases);
@@ -202,7 +219,12 @@ mod tests {
     }
 
     fn test_constants(actual: Vec<Object>, expected: &Vec<Object>) {
-        assert_eq!(actual.len(), expected.len());
+        assert_eq!(
+            actual.len(),
+            expected.len(),
+            "Constant pool doesn't have the same number of objects."
+        );
+
         for (a, e) in actual.iter().zip(expected) {
             match a {
                 Integer(i) => test_integer_object(a, e),
