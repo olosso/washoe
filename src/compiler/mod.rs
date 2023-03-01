@@ -61,7 +61,9 @@ impl Compiler {
         self.constants.len() - 1
     }
 
-    fn emit(&mut self, op: code::Op, operands: &[u32]) -> usize {
+    /// This is the internal function that the compiler uses to
+    /// add instructions to its private instructions field.
+    fn emit(&mut self, op: code::Op, operands: Option<&[u32]>) -> usize {
         let mut ins = code::make(op, operands);
         self.add_instruction(&mut ins)
     }
@@ -110,17 +112,70 @@ mod tests {
     #[test]
     fn test_integer_arithmetic() {
         use code::make;
-        let cases = [CompilerCase {
-            input: "3 + 2 + 5",
-            expected_constants: vec![Integer(3), Integer(2), Integer(5)],
-            expected_instructions: &[
-                make(Constant, &[0]),
-                make(Constant, &[1]),
-                make(Add, &[]),
-                make(Constant, &[2]),
-                make(Add, &[]),
-            ],
-        }];
+        let cases = [
+            CompilerCase {
+                input: "1; 2;",
+                expected_constants: vec![Integer(1), Integer(2)],
+                expected_instructions: &[
+                    make(Constant, Some(&[0])),
+                    make(Pop, None),
+                    make(Constant, Some(&[1])),
+                    make(Pop, None),
+                ],
+            },
+            CompilerCase {
+                input: "3 + 2",
+                expected_constants: vec![Integer(3), Integer(2)],
+                expected_instructions: &[
+                    make(Constant, Some(&[0])),
+                    make(Constant, Some(&[1])),
+                    make(Add, None),
+                    make(Pop, None),
+                ],
+            },
+            CompilerCase {
+                input: "3 + 2 + 5",
+                expected_constants: vec![Integer(3), Integer(2), Integer(5)],
+                expected_instructions: &[
+                    make(Constant, Some(&[0])),
+                    make(Constant, Some(&[1])),
+                    make(Add, None),
+                    make(Constant, Some(&[2])),
+                    make(Add, None),
+                    make(Pop, None),
+                ],
+            },
+            CompilerCase {
+                input: "3 / 2",
+                expected_constants: vec![Integer(3), Integer(2)],
+                expected_instructions: &[
+                    make(Constant, Some(&[0])),
+                    make(Constant, Some(&[1])),
+                    make(Div, None),
+                    make(Pop, None),
+                ],
+            },
+            CompilerCase {
+                /*
+                 *    +
+                 *   / \
+                 *  3   *
+                 *     / \
+                 *    2   5
+                 */
+                input: "3 + 2 * 5",
+                // NOTE Notice the order of the objects in the constant pool!!
+                expected_constants: vec![Integer(3), Integer(2), Integer(5)],
+                expected_instructions: &[
+                    make(Constant, Some(&[0])),
+                    make(Constant, Some(&[1])),
+                    make(Constant, Some(&[2])),
+                    make(Mul, None),
+                    make(Add, None),
+                    make(Pop, None),
+                ],
+            },
+        ];
 
         test_compiler_cases(&cases);
     }

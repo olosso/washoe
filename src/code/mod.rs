@@ -145,16 +145,24 @@ lazy_static! {
  * 256 = 0x00000101 => select only the 2 last bytes => 0x0101 => [1, 1]
  * Combined we get [0, 1, 1], where [1, 1] should be interpreted as big endian.
  */
-pub fn make(op: Op, operands: &[u32]) -> Instructions {
+pub fn make(op: Op, operands: Option<&[u32]>) -> Instructions {
     let def = DEFINITIONS.get(&op).expect("Bad Opcode to make.");
 
     let instruction_len: usize = (1 + def.operand_widths.iter().sum::<u8>()).into();
     let mut instruction = vec![];
     instruction.push(op as u8);
 
+    // If Op has some operands, unwrap them. Otherwise return early.
+    let operands = if let Some(operands) = operands {
+        operands
+    } else {
+        return Instructions::new(instruction);
+    };
+
     let mut offset = 1;
     for (o, w) in operands.iter().zip(def.operand_widths) {
         match w {
+            0 => unreachable!(),
             2 => {
                 let bytes = o.to_be_bytes();
                 // Getting the two last bytes of a 4 byte thing.
@@ -205,19 +213,19 @@ mod tests {
     fn test_make() {
         struct Case<'case> {
             op: Op,
-            operands: &'case [u32],
+            operands: Option<&'case [u32]>,
             expected: &'case [u8],
         };
 
         let cases = [
             Case {
                 op: Op::Constant,
-                operands: &[65534],
+                operands: Some(&[65534]),
                 expected: &[Op::Constant as u8, 255, 254],
             },
             Case {
                 op: Op::Add,
-                operands: &[],
+                operands: None,
                 expected: &[Op::Add as u8],
             },
         ];
@@ -237,16 +245,18 @@ mod tests {
     fn test_instruction_string() {
         use Op::*;
         let instructions = [
-            &make(Constant, &[1])[..],
-            &make(Constant, &[2])[..],
-            &make(Constant, &[65535])[..],
-            &make(Add, &[])[..],
+            &make(Constant, Some(&[1]))[..],
+            &make(Constant, Some(&[2]))[..],
+            &make(Constant, Some(&[65535]))[..],
+            &make(Add, None)[..],
+            &make(Mul, None)[..],
         ];
 
         let expected = "0000 OpConstant 1
 0003 OpConstant 2
 0006 OpConstant 65535
 0009 OpAdd
+0010 OpMul
 ";
 
         let concatted = Instructions::new(instructions.concat());
@@ -262,12 +272,13 @@ mod tests {
         use Op::*;
         struct Case<'operand> {
             op: Op,
-            operands: &'operand [u32],
+            operands: Option<&'operand [u32]>,
             bytes_read: usize,
         }
+
         let cases = [Case {
             op: Constant,
-            operands: &[65535],
+            operands: Some(&[65535]),
             bytes_read: 2,
         }];
 
@@ -277,7 +288,7 @@ mod tests {
             let (operands_read, n) = read_operands(definition, &instruction[1..]);
 
             assert_eq!(case.bytes_read, n);
-            for (a, e) in operands_read.iter().zip(case.operands) {
+            for (a, e) in operands_read.iter().zip(case.operands.unwrap()) {
                 assert_eq!(*a, *e as u16)
             }
         }
