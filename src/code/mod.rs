@@ -77,7 +77,11 @@ impl fmt::Display for Instructions {
 #[repr(u8)] // Forces Rust to store a Opcode in one byte
 pub enum Op {
     Constant = 0,
-    Add = 1,
+    Pop = 1,
+    Add = 2,
+    Sub = 3,
+    Mul = 4,
+    Div = 5,
 }
 
 impl fmt::Display for Op {
@@ -95,11 +99,17 @@ impl TryFrom<u8> for Op {
     type Error = &'static str;
 
     fn try_from(byte: u8) -> Result<Self, Self::Error> {
-        match byte {
-            0 => Ok(Self::Constant),
-            1 => Ok(Self::Add),
-            _ => Err("No Opcode corresponding to byte found."),
-        }
+        let code = match byte {
+            0 => Self::Constant,
+            1 => Self::Pop,
+            2 => Self::Add,
+            3 => Self::Sub,
+            4 => Self::Mul,
+            5 => Self::Div,
+            _ => return Err("No Opcode corresponding to byte found."),
+        };
+
+        Ok(code)
     }
 }
 
@@ -120,20 +130,56 @@ pub struct Definition {
 
 /*
  * This HashMap contains all supported Opcodes and their operand widths.
+ *
+ * OpConstant: The compiler will keep track of values that can be evaluated at compile time.
+ * These are called constants, or statics. The operand of the Opcode isn't the value
+ * of the constant, but an index.
+ *
  */
 lazy_static! {
-    pub static ref DEFINITIONS: HashMap<Op, Definition> = HashMap::from([(
-        /*
-         * The compiler will keep track of values that can be evaluated at compile time.
-         * These are called constants, or statics. The operand of the Opcode isn't the value
-         * of the constant, but an index.
-         */
-        Op::Constant,
-        Definition {
-            name: "OpConstant",
-            operand_widths: &[2], // This means that the constant pool is allowed 65536 Objects.
-        },
-    ), (Op::Add, Definition { name: "OpAdd", operand_widths: &[] })
+    pub static ref DEFINITIONS: HashMap<Op, Definition> = HashMap::from([
+        (
+            Op::Constant,
+            Definition {
+                name: "OpConstant",
+                operand_widths: &[2] // This means that the constant pool can have ~65000 Objects.
+            },
+        ),
+        (
+            Op::Pop,
+            Definition {
+                name: "OpPop",
+                operand_widths: &[]
+            }
+        ),
+        (
+            Op::Add,
+            Definition {
+                name: "OpAdd",
+                operand_widths: &[]
+            }
+        ),
+        (
+            Op::Sub,
+            Definition {
+                name: "OpSub",
+                operand_widths: &[]
+            }
+        ),
+        (
+            Op::Mul,
+            Definition {
+                name: "OpMul",
+                operand_widths: &[]
+            }
+        ),
+        (
+            Op::Div,
+            Definition {
+                name: "OpDiv",
+                operand_widths: &[]
+            }
+        )
     ]);
 }
 

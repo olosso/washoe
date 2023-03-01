@@ -71,7 +71,7 @@ impl<'stack> VM<'stack> {
     /*
      * The VM executes the bytecode by getting instructions and constants from the compiler,
      * and defining behaviour for the Opcodes that it supports. At runtime depending on the Opcode,
-     * data is pushed on the stack, and popped off the stack.
+     * data is pushed on the stack, or popped off the stack.
      *
      * If the stack size (in bytes) exceeds a predetermined limit, the VM will crash with a "stack overflow".
      */
@@ -82,15 +82,28 @@ impl<'stack> VM<'stack> {
 
             match op {
                 Op::Constant => {
+                    // Read the index of the constant from the operand for Op::Constant.
                     let const_index = read_uint16(&self.instructions, ip + 1);
                     ip += 2;
+
+                    // Push the Object corresponding to the index onto the stack.
                     self.push(self.constants[const_index as usize].clone());
                 }
-                Op::Add => {
-                    let b = self.pop();
-                    let a = self.pop();
+                Op::Add | Op::Sub | Op::Mul | Op::Div => {
+                    let right = self.pop().clone();
+                    let left = self.pop().clone();
 
-                    self.push(Object::add(a, b).unwrap());
+                    let operation = match op {
+                        Op::Add => Object::add,
+                        Op::Sub => Object::sub,
+                        Op::Mul => Object::mul,
+                        Op::Div => Object::div,
+                        _ => unreachable!(),
+                    };
+                    self.push(operation(left, right));
+                }
+                Op::Pop => {
+                    self.pop();
                 }
                 _ => todo!(),
             }
@@ -186,16 +199,32 @@ mod vm_tests {
                     expected: Integer(1),
                 },
                 VMCase {
-                    input: "2",
-                    expected: Integer(2),
-                },
-                VMCase {
                     input: "7 + 8",
                     expected: Integer(15),
                 },
                 VMCase {
-                    input: "7 + 8 + 3",
-                    expected: Integer(18),
+                    input: "2 - 1",
+                    expected: Integer(1),
+                },
+                VMCase {
+                    input: "10 * 2",
+                    expected: Integer(20),
+                },
+                VMCase {
+                    input: "7 + 8 * 3",
+                    expected: Integer(31),
+                },
+                VMCase {
+                    input: "7 * 8 + 3",
+                    expected: Integer(59),
+                },
+                VMCase {
+                    input: "(7 + 8) * 3",
+                    expected: Integer(45),
+                },
+                VMCase {
+                    input: "7 * 9 / 3",
+                    expected: Integer(21),
                 },
             ];
 

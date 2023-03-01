@@ -16,13 +16,9 @@ pub struct Compiler {
 }
 
 impl Compiler {
-    pub fn new(instructions: code::Instructions, constants: Vec<Object>) -> Self {
-        Self {
-            instructions,
-            constants,
-        }
-    }
-
+    /*
+     * Given an AST, produce bytecode.
+     */
     pub fn compile(&mut self, program: ast::Program) {
         for statement in program.statements {
             self.c_statement(&statement);
@@ -31,7 +27,10 @@ impl Compiler {
 
     fn c_statement(&mut self, stmt: &Statement) {
         match stmt {
-            Expr(_, e) => self.c_expression(e),
+            Expr(_, e) => {
+                self.c_expression(e);
+                self.emit(Op::Pop, None);
+            }
             _ => todo!(),
         }
     }
@@ -39,16 +38,19 @@ impl Compiler {
     fn c_expression(&mut self, expr: &Expression) {
         match expr {
             IntegerLiteral(_, i) => {
-                let i = Integer(*i);
-                let pos = [self.add_constant(i) as u32];
-                self.emit(Op::Constant, &pos);
+                let obj = Integer(*i);
+                let pos = [self.add_constant(obj) as u32];
+                self.emit(Op::Constant, Some(&pos));
             }
             Infix(_, l, op, r) => {
                 self.c_expression(l);
                 self.c_expression(r);
 
                 match op.as_str() {
-                    "+" => self.emit(Op::Add, &[]),
+                    "+" => self.emit(Op::Add, None),
+                    "-" => self.emit(Op::Sub, None),
+                    "*" => self.emit(Op::Mul, None),
+                    "/" => self.emit(Op::Div, None),
                     _ => todo!(),
                 };
             }
@@ -56,6 +58,8 @@ impl Compiler {
         }
     }
 
+    /// Add an Object to the constant pool.
+    /// Returns the index of the constant.
     fn add_constant(&mut self, obj: Object) -> usize {
         self.constants.push(obj);
         self.constants.len() - 1
@@ -68,13 +72,16 @@ impl Compiler {
         self.add_instruction(&mut ins)
     }
 
+    /// A helper function for self.emit.
     fn add_instruction(&mut self, ins: &mut Instructions) -> usize {
         let pos_new_ins = self.instructions.len();
         self.instructions.append(ins);
         pos_new_ins
     }
 
-    // NOTE this consumes the Compiler
+    /// Public function to transfer instructions and constants
+    /// to the VM.
+    /// NOTE this consumes the Compiler.
     pub fn bytecode(self) -> Bytecode {
         Bytecode {
             instructions: self.instructions,
@@ -208,22 +215,24 @@ mod tests {
         assert!(matches!(e, Object::Integer(..)));
         if let Object::Integer(i) = a {
             if let Object::Integer(j) = e {
-                assert_eq!(i, j, "Constant pool not the same");
+                assert_eq!(i, j, "Constant pool not the same.");
             }
         }
     }
 
     fn test_instructions(actual: code::Instructions, expected: &[code::Instructions]) {
+        println!("actual {actual:?}",);
+        println!("expected {expected:?}",);
         let concat = concat_instructions(expected);
 
         assert_eq!(
             actual.len(),
             concat.len(),
-            "Instruction lengths not the same"
+            "Instruction lengths in bytes not the same."
         );
         assert!(
             actual.iter().eq(concat.iter()),
-            "Instruction contents not the same"
+            "Instruction contents not the same."
         );
     }
 

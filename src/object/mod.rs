@@ -222,16 +222,41 @@ impl Object {
         }
     }
 
-    pub fn add(a: Object, b: Object) -> Result<Object, EvalError> {
-        let mut result = Err(EvalError::new("Can only add two integers.".to_string()));
-
-        if let Object::Integer(a) = a {
-            if let Object::Integer(b) = b {
-                result = Ok(Object::Integer(a + b));
+    fn unwrap_ints(left: Object, right: Object) -> Option<(i32, i32)> {
+        if let Object::Integer(a) = left {
+            if let Object::Integer(b) = right {
+                Some((a, b))
+            } else {
+                None
             }
+        } else {
+            None
         }
+    }
 
-        result
+    pub fn add(left: Object, right: Object) -> Object {
+        let (l, r) = Self::unwrap_ints(left, right)
+            .expect("Non-numeric operands to given to numeric operation.");
+
+        Object::Integer(l + r)
+    }
+    pub fn sub(left: Object, right: Object) -> Object {
+        let (l, r) = Self::unwrap_ints(left, right)
+            .expect("Non-numeric operands to given to numeric operation.");
+
+        Object::Integer(l - r)
+    }
+    pub fn mul(left: Object, right: Object) -> Object {
+        let (l, r) = Self::unwrap_ints(left, right)
+            .expect("Non-numeric operands to given to numeric operation.");
+
+        Object::Integer(l * r)
+    }
+    pub fn div(left: Object, right: Object) -> Object {
+        let (l, r) = Self::unwrap_ints(left, right)
+            .expect("Non-numeric operands to given to numeric operation.");
+
+        Object::Integer(l / r)
     }
 
     /*
