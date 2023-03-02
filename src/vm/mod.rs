@@ -107,7 +107,23 @@ impl<'stack> VM<'stack> {
                         Op::Div => Object::div,
                         _ => unreachable!(),
                     };
-                    self.push(operation(left, right));
+                    self.push(operation(&left, &right));
+                }
+                Op::Equal | Op::NotEqual | Op::GT => {
+                    let right = self.pop().clone();
+                    let left = self.pop().clone();
+
+                    let operation = match op {
+                        Op::Equal => Object::eq,
+                        Op::NotEqual => Object::eq,
+                        Op::GT => Object::gt,
+                        _ => unreachable!(),
+                    };
+                    let mut result = operation(&left, &right);
+                    if op == Op::NotEqual {
+                        result = !result;
+                    }
+                    self.push(Object::Boolean(result));
                 }
                 Op::Pop => {
                     self.pop();
@@ -259,6 +275,42 @@ mod vm_tests {
                 VMCase {
                     input: "false",
                     expected: Boolean(false),
+                },
+                VMCase {
+                    input: "true == true",
+                    expected: Boolean(true),
+                },
+                VMCase {
+                    input: "true == false",
+                    expected: Boolean(false),
+                },
+                VMCase {
+                    input: "true != false",
+                    expected: Boolean(true),
+                },
+                VMCase {
+                    input: "1 > 2",
+                    expected: Boolean(false),
+                },
+                VMCase {
+                    input: "1 < 2",
+                    expected: Boolean(true),
+                },
+                VMCase {
+                    input: "(1 + 2) > 2",
+                    expected: Boolean(true),
+                },
+                VMCase {
+                    input: "(1 + 2) < (3 * 10)",
+                    expected: Boolean(true),
+                },
+                VMCase {
+                    input: "(1 > 2) == true",
+                    expected: Boolean(false),
+                },
+                VMCase {
+                    input: "(1 < 2) == true",
+                    expected: Boolean(true),
                 },
             ];
 

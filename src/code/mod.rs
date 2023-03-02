@@ -84,6 +84,9 @@ pub enum Op {
     Div = 5,
     True = 6,
     False = 7,
+    Equal = 8,
+    NotEqual = 9,
+    GT = 10,
 }
 
 impl fmt::Display for Op {
@@ -110,6 +113,9 @@ impl TryFrom<u8> for Op {
             5 => Self::Div,
             6 => Self::True,
             7 => Self::False,
+            8 => Self::Equal,
+            9 => Self::NotEqual,
+            10 => Self::GT,
             _ => return Err("No Opcode corresponding to byte found."),
         };
 
@@ -195,6 +201,27 @@ lazy_static! {
             Op::False,
             Definition {
                 name: "OpFalse",
+                operand_widths: &[]
+            }
+        ),
+        (
+            Op::Equal,
+            Definition {
+                name: "OpEqual",
+                operand_widths: &[]
+            }
+        ),
+        (
+            Op::NotEqual,
+            Definition {
+                name: "OpNotEqual",
+                operand_widths: &[]
+            }
+        ),
+        (
+            Op::GT,
+            Definition {
+                name: "OpGreaterThan",
                 operand_widths: &[]
             }
         )

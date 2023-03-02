@@ -222,10 +222,10 @@ impl Object {
         }
     }
 
-    fn unwrap_ints(left: Object, right: Object) -> Option<(i32, i32)> {
+    fn unwrap_ints(left: &Object, right: &Object) -> Option<(i32, i32)> {
         if let Object::Integer(a) = left {
             if let Object::Integer(b) = right {
-                Some((a, b))
+                Some((*a, *b))
             } else {
                 None
             }
@@ -234,29 +234,35 @@ impl Object {
         }
     }
 
-    pub fn add(left: Object, right: Object) -> Object {
+    pub fn add(left: &Object, right: &Object) -> Object {
         let (l, r) = Self::unwrap_ints(left, right)
             .expect("Non-numeric operands to given to numeric operation.");
 
         Object::Integer(l + r)
     }
-    pub fn sub(left: Object, right: Object) -> Object {
+    pub fn sub(left: &Object, right: &Object) -> Object {
         let (l, r) = Self::unwrap_ints(left, right)
             .expect("Non-numeric operands to given to numeric operation.");
 
         Object::Integer(l - r)
     }
-    pub fn mul(left: Object, right: Object) -> Object {
+    pub fn mul(left: &Object, right: &Object) -> Object {
         let (l, r) = Self::unwrap_ints(left, right)
             .expect("Non-numeric operands to given to numeric operation.");
 
         Object::Integer(l * r)
     }
-    pub fn div(left: Object, right: Object) -> Object {
+    pub fn div(left: &Object, right: &Object) -> Object {
         let (l, r) = Self::unwrap_ints(left, right)
             .expect("Non-numeric operands to given to numeric operation.");
 
         Object::Integer(l / r)
+    }
+    pub fn gt(left: &Object, right: &Object) -> bool {
+        let (l, r) = Self::unwrap_ints(left, right)
+            .expect("Non-numeric operands to given to numeric operation.");
+
+        l > r
     }
 
     /*

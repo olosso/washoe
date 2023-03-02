@@ -50,14 +50,22 @@ impl Compiler {
                 self.emit(Op::Constant, Some(&pos));
             }
             Infix(_, l, op, r) => {
-                self.c_expression(l);
-                self.c_expression(r);
+                if op == "<" {
+                    self.c_expression(r);
+                    self.c_expression(l);
+                } else {
+                    self.c_expression(l);
+                    self.c_expression(r);
+                }
 
                 match op.as_str() {
                     "+" => self.emit(Op::Add, None),
                     "-" => self.emit(Op::Sub, None),
                     "*" => self.emit(Op::Mul, None),
                     "/" => self.emit(Op::Div, None),
+                    "==" => self.emit(Op::Equal, None),
+                    "!=" => self.emit(Op::NotEqual, None),
+                    ">" | "<" => self.emit(Op::GT, None),
                     _ => todo!(),
                 };
             }
@@ -199,6 +207,70 @@ mod tests {
                 expected_constants: vec![],
                 expected_instructions: &[make(False, None), make(Pop, None)],
             },
+            CompilerCase {
+                input: "1 == 2",
+                expected_constants: vec![Integer(1), Integer(2)],
+                expected_instructions: &[
+                    make(Constant, Some(&[0])),
+                    make(Constant, Some(&[1])),
+                    make(Equal, None),
+                    make(Pop, None),
+                ],
+            },
+            CompilerCase {
+                input: "1 != 2",
+                expected_constants: vec![Integer(1), Integer(2)],
+                expected_instructions: &[
+                    make(Constant, Some(&[0])),
+                    make(Constant, Some(&[1])),
+                    make(NotEqual, None),
+                    make(Pop, None),
+                ],
+            },
+            CompilerCase {
+                input: "1 < 2",
+                expected_constants: vec![Integer(2), Integer(1)],
+                expected_instructions: &[
+                    make(Constant, Some(&[0])),
+                    make(Constant, Some(&[1])),
+                    make(GT, None),
+                    make(Pop, None),
+                ],
+            },
+            CompilerCase {
+                input: "1 > 2",
+                expected_constants: vec![Integer(1), Integer(2)],
+                expected_instructions: &[
+                    make(Constant, Some(&[0])),
+                    make(Constant, Some(&[1])),
+                    make(GT, None),
+                    make(Pop, None),
+                ],
+            },
+            CompilerCase {
+                input: "(1 + 3) > 2",
+                expected_constants: vec![Integer(1), Integer(3), Integer(2)],
+                expected_instructions: &[
+                    make(Constant, Some(&[0])),
+                    make(Constant, Some(&[1])),
+                    make(Add, None),
+                    make(Constant, Some(&[2])),
+                    make(GT, None),
+                    make(Pop, None),
+                ],
+            },
+            CompilerCase {
+                input: "(1 + 3) < 2",
+                expected_constants: vec![Integer(2), Integer(1), Integer(3)],
+                expected_instructions: &[
+                    make(Constant, Some(&[0])),
+                    make(Constant, Some(&[1])),
+                    make(Constant, Some(&[2])),
+                    make(Add, None),
+                    make(GT, None),
+                    make(Pop, None),
+                ],
+            },
         ];
 
         test_compiler_cases(&cases);
@@ -243,8 +315,6 @@ mod tests {
     }
 
     fn test_instructions(actual: code::Instructions, expected: &[code::Instructions]) {
-        println!("actual {actual:?}",);
-        println!("expected {expected:?}",);
         let concat = concat_instructions(expected);
 
         assert_eq!(
