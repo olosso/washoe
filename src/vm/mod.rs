@@ -96,6 +96,18 @@ impl<'stack> VM<'stack> {
                         self.push(Object::Boolean(false))
                     }
                 }
+                Op::Minus | Op::Bang => {
+                    let right = self.pop();
+
+                    let operation = match op {
+                        Op::Minus => Object::minus,
+                        Op::Bang => Object::bang,
+                        _ => unreachable!(),
+                    };
+
+                    let result = operation(right);
+                    self.push(result);
+                }
                 Op::Add | Op::Sub | Op::Mul | Op::Div => {
                     let right = self.pop().clone();
                     let left = self.pop().clone();
@@ -260,6 +272,10 @@ mod vm_tests {
                     input: "7 * 9 / 3",
                     expected: Integer(21),
                 },
+                VMCase {
+                    input: "1 + 3 * 3 - -10",
+                    expected: Integer(20),
+                },
             ];
 
             test_vm_run(&cases);
@@ -311,6 +327,14 @@ mod vm_tests {
                 VMCase {
                     input: "(1 < 2) == true",
                     expected: Boolean(true),
+                },
+                VMCase {
+                    input: "(1 < -2) == !true",
+                    expected: Boolean(true),
+                },
+                VMCase {
+                    input: "!!!true",
+                    expected: Boolean(false),
                 },
             ];
 

@@ -264,6 +264,16 @@ impl Object {
 
         l > r
     }
+    pub fn minus(right: &Object) -> Object {
+        if let Self::Integer(i) = right {
+            Self::Integer(-i)
+        } else {
+            panic!("Non-numeric operand given to minus.")
+        }
+    }
+    pub fn bang(right: &Object) -> Object {
+        Self::Boolean(!right.as_bool())
+    }
 
     /*
      * @FUNCTION_HELPERS

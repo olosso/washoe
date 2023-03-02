@@ -49,6 +49,15 @@ impl Compiler {
                 let pos = [self.add_constant(obj) as u32];
                 self.emit(Op::Constant, Some(&pos));
             }
+            Prefix(_, op, r) => {
+                self.c_expression(r);
+
+                match op.as_str() {
+                    "-" => self.emit(Op::Minus, None),
+                    "!" => self.emit(Op::Bang, None),
+                    _ => todo!(),
+                };
+            }
             Infix(_, l, op, r) => {
                 if op == "<" {
                     self.c_expression(r);
@@ -270,6 +279,22 @@ mod tests {
                     make(GT, None),
                     make(Pop, None),
                 ],
+            },
+            CompilerCase {
+                input: "-(1 + 3)",
+                expected_constants: vec![Integer(1), Integer(3)],
+                expected_instructions: &[
+                    make(Constant, Some(&[0])),
+                    make(Constant, Some(&[1])),
+                    make(Add, None),
+                    make(Minus, None),
+                    make(Pop, None),
+                ],
+            },
+            CompilerCase {
+                input: "!true",
+                expected_constants: vec![],
+                expected_instructions: &[make(True, None), make(Bang, None), make(Pop, None)],
             },
         ];
 
