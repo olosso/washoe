@@ -1,3 +1,4 @@
+use std::fmt;
 use std::mem::{self, MaybeUninit};
 use std::ops::{Deref, DerefMut};
 
@@ -32,6 +33,16 @@ impl Stack {
         };
 
         Stack(nulls)
+    }
+}
+
+impl fmt::Display for Stack {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut s = String::new();
+        for o in self.0.iter().take_while(|x| x != &&Object::Null) {
+            s = s + &o.inspect() + "\n";
+        }
+        write!(f, "{s}")
     }
 }
 
@@ -78,6 +89,9 @@ impl<'stack> VM<'stack> {
     pub fn run(&mut self) {
         let mut ip = 0;
         while ip < self.instructions.len() {
+            println!("INSTRUCTIONS:\n{}", self.instructions);
+            println!("TOPLEVEL: Current instruction pointer {ip}");
+
             let op = Op::try_from(self.instructions[ip]).unwrap();
 
             match op {
@@ -137,12 +151,48 @@ impl<'stack> VM<'stack> {
                     }
                     self.push(Object::Boolean(result));
                 }
+                Op::Jump | Op::JumpMaybe => {
+                    // Get the operand of the Jump instruction.
+                    let const_index = read_uint16(&self.instructions, ip + 1);
+                    let next_ins = if let Some(Object::Integer(i)) =
+                        self.constants.get(const_index as usize)
+                    {
+                        *i as usize
+                    } else {
+                        panic!("Failed to fetch operand of OpJump")
+                    };
+
+                    match op {
+                        Op::Jump => {
+                            ip += next_ins;
+                        }
+                        Op::JumpMaybe => {
+                            let cond = self.pop();
+                            match cond {
+                                Object::Boolean(b) => {
+                                    if !*b {
+                                        // Increment ip, if the condition evaluated to false.
+                                        ip += next_ins;
+                                        // Short-circuit to skip over the default increment of 1 after every instruction.
+                                        continue;
+                                    } else {
+                                        // Need to jump over the operand bytes, if the condition evaluated to true.
+                                        ip += 2;
+                                    }
+                                }
+                                _ => panic!("Conditional Jump not preceeded by a Boolean."),
+                            }
+                        }
+                        _ => unreachable!(),
+                    }
+                }
                 Op::Pop => {
                     self.pop();
                 }
                 _ => todo!(),
             }
 
+            // NOTE I'm here!
             ip += 1;
         }
     }
@@ -216,6 +266,9 @@ mod vm_tests {
                 let mut stack = Stack::new();
                 let mut vm = VM::new(compiler.bytecode(), &mut stack);
                 vm.run();
+
+                println!("{}", vm.stack);
+                println!("{}", vm.instructions);
 
                 // Confirmation
                 let top = vm.last_popped_obj();
@@ -335,6 +388,34 @@ mod vm_tests {
                 VMCase {
                     input: "!!!true",
                     expected: Boolean(false),
+                },
+            ];
+
+            test_vm_run(&cases);
+        }
+
+        #[test]
+        fn test_if_eval() {
+            let cases = [
+                VMCase {
+                    input: "if (true) { 23 }",
+                    expected: Integer(23),
+                },
+                VMCase {
+                    input: "if (false) { 23 }; 42;",
+                    expected: Integer(42),
+                },
+                VMCase {
+                    input: "if (4 < 8) { 23 }",
+                    expected: Integer(23),
+                },
+                VMCase {
+                    input: "if (4 > 8) { 23 } else { 42 }",
+                    expected: Integer(42),
+                },
+                VMCase {
+                    input: "if (4 < 8) { 4; 8; 15; 16; 23; 42  } else { 0 }",
+                    expected: Integer(42),
                 },
             ];
 

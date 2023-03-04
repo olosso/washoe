@@ -89,6 +89,8 @@ pub enum Op {
     GT = 10,
     Minus = 11,
     Bang = 12,
+    Jump = 13,
+    JumpMaybe = 14,
 }
 
 impl fmt::Display for Op {
@@ -120,6 +122,8 @@ impl TryFrom<u8> for Op {
             10 => Self::GT,
             11 => Self::Minus,
             12 => Self::Bang,
+            13 => Self::Jump,
+            14 => Self::JumpMaybe,
             _ => return Err("No Opcode corresponding to byte found."),
         };
 
@@ -241,6 +245,20 @@ lazy_static! {
             Definition {
                 name: "OpBang",
                 operand_widths: &[]
+            }
+        ),
+        (
+            Op::Jump,
+            Definition {
+                name: "OpJumpMaybe",
+                operand_widths: &[2]
+            }
+        ),
+        (
+            Op::JumpMaybe,
+            Definition {
+                name: "OpJumpMaybe",
+                operand_widths: &[2]
             }
         )
     ]);

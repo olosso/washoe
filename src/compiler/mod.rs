@@ -29,7 +29,16 @@ impl Compiler {
         match stmt {
             Expr(_, e) => {
                 self.c_expression(e);
-                self.emit(Op::Pop, None);
+
+                // Don't add unnecessary Pop after If
+                if !matches!(e, Expression::If(..)) {
+                    self.emit(Op::Pop, None);
+                }
+            }
+            Block(_, statements) => {
+                for statement in statements {
+                    self.c_statement(statement);
+                }
             }
             _ => todo!(),
         }
@@ -78,6 +87,36 @@ impl Compiler {
                     _ => todo!(),
                 };
             }
+            If(_, cond, cons, alt) => {
+                self.c_expression(cond);
+
+                // object index
+                let jump_cond_obj = [self.add_constant(Object::Null) as u32];
+
+                // jump instruction number
+                let jump_cond_ins = self.emit(Op::JumpMaybe, Some(&jump_cond_obj));
+
+                self.c_statement(cons);
+
+                // jump offset
+                let mut cons_len = self.instructions.len() as i32 - jump_cond_ins as i32;
+
+                if let Some(alt) = alt {
+                    let jump_uncond_obj = [self.add_constant(Object::Null) as u32];
+                    let jump_uncond_ins = self.emit(Op::Jump, Some(&jump_uncond_obj));
+                    self.c_statement(alt);
+                    self.constants[jump_uncond_obj[0] as usize] =
+                        Integer(self.instructions.len() as i32 - jump_uncond_ins as i32);
+
+                    /*
+                     * Add three to the conditional offset,
+                     * to get over the unconditional Jump we just added.
+                     */
+                    cons_len += 3;
+                };
+
+                self.constants[jump_cond_obj[0] as usize] = Integer(cons_len);
+            }
             _ => todo!(),
         }
     }
@@ -91,6 +130,7 @@ impl Compiler {
 
     /// This is the internal function that the compiler uses to
     /// add instructions to its private instructions field.
+    /// Returns the instruction index of the added instruction.
     fn emit(&mut self, op: code::Op, operands: Option<&[u32]>) -> usize {
         let mut ins = code::make(op, operands);
         self.add_instruction(&mut ins)
@@ -301,6 +341,119 @@ mod tests {
         test_compiler_cases(&cases);
     }
 
+    #[test]
+    fn test_jump_instructions() {
+        use code::make;
+        let cases = [
+            CompilerCase {
+                input: "if (4 > 8) { 10 }; 666;",
+                expected_constants: vec![
+                    Integer(4),
+                    Integer(8),
+                    Integer(7), // JumpMaybe offset
+                    Integer(10),
+                    Integer(666),
+                ],
+                expected_instructions: &[
+                    // 0000 OpConstant 4
+                    make(Constant, Some(&[0])),
+                    // 0003 OpConstant 8
+                    make(Constant, Some(&[1])),
+                    // 0006 OpGT
+                    make(GT, None),
+                    // 0007 JumpMaybe 7
+                    make(JumpMaybe, Some(&[2])),
+                    // 0010 OpConstant 4
+                    make(Constant, Some(&[3])),
+                    // 0013 OpPop
+                    make(Pop, None),
+                    // 0014 OpConstant 666
+                    make(Constant, Some(&[4])),
+                    // 0017 OpPop
+                    make(Pop, None),
+                ],
+            },
+            CompilerCase {
+                input: "if (false) { 10 }; 666;",
+                expected_constants: vec![
+                    Integer(7), // JumpMaybe offset
+                    Integer(10),
+                    Integer(666),
+                ],
+                expected_instructions: &[
+                    make(False, None),
+                    make(JumpMaybe, Some(&[0])),
+                    make(Constant, Some(&[1])),
+                    make(Pop, None),
+                    make(Constant, Some(&[2])),
+                    make(Pop, None),
+                ],
+            },
+            CompilerCase {
+                input: "if (4 > 8) { 42 } else { 23 }; 666;",
+                expected_constants: vec![
+                    Integer(4),
+                    Integer(8),
+                    Integer(10), // JumpMaybe offset
+                    Integer(42),
+                    Integer(7), // Jump offset
+                    Integer(23),
+                    Integer(666),
+                ],
+                expected_instructions: &[
+                    // 0000 OpConstant 4
+                    make(Constant, Some(&[0])),
+                    // 0003 OpConstant 8
+                    make(Constant, Some(&[1])),
+                    // 0006 OpGT
+                    make(GT, None),
+                    // 0007 JumpMaybe 10
+                    make(JumpMaybe, Some(&[2])),
+                    // 0010 OpConstant 42
+                    make(Constant, Some(&[3])),
+                    // 0013 OpPop
+                    make(Pop, None),
+                    // 0014 OpJump 6
+                    make(Jump, Some(&[4])),
+                    // 0017 OpConstant 23
+                    make(Constant, Some(&[5])),
+                    // 0020 OpPop
+                    make(Pop, None),
+                    // 0021 OpConstant 666
+                    make(Constant, Some(&[6])),
+                    // 0024 OpPop
+                    make(Pop, None),
+                ],
+            },
+            CompilerCase {
+                input: "if (4 < 8) { 42 } else { 23 }; 666;",
+                expected_constants: vec![
+                    Integer(8),
+                    Integer(4),
+                    Integer(10), // JumpMaybe offset
+                    Integer(42),
+                    Integer(7), // Jump offset
+                    Integer(23),
+                    Integer(666),
+                ],
+                expected_instructions: &[
+                    make(Constant, Some(&[0])),
+                    make(Constant, Some(&[1])),
+                    make(GT, None),
+                    make(JumpMaybe, Some(&[2])),
+                    make(Constant, Some(&[3])),
+                    make(Pop, None),
+                    make(Jump, Some(&[4])),
+                    make(Constant, Some(&[5])),
+                    make(Pop, None),
+                    make(Constant, Some(&[6])),
+                    make(Pop, None),
+                ],
+            },
+        ];
+
+        test_compiler_cases(&cases);
+    }
     fn test_compiler_cases(cases: &[CompilerCase]) {
         for case in cases {
             let program = parse(case.input);
@@ -342,6 +495,8 @@ mod tests {
     fn test_instructions(actual: code::Instructions, expected: &[code::Instructions]) {
         let concat = concat_instructions(expected);
 
+        println!("{}", actual);
+        println!("{}", concat);
         assert_eq!(
             actual.len(),
             concat.len(),
