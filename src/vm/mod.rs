@@ -89,12 +89,15 @@ impl<'stack> VM<'stack> {
     pub fn run(&mut self) {
         let mut ip = 0;
         while ip < self.instructions.len() {
-            println!("INSTRUCTIONS:\n{}", self.instructions);
             println!("TOPLEVEL: Current instruction pointer {ip}");
+            println!("INSTRUCTIONS:\n{}", self.instructions);
 
             let op = Op::try_from(self.instructions[ip]).unwrap();
 
             match op {
+                Op::Null => {
+                    self.push(Object::Null);
+                }
                 Op::Constant => {
                     // Read the index of the constant from the operand for Op::Constant.
                     let const_index = read_uint16(&self.instructions, ip + 1);
@@ -159,28 +162,30 @@ impl<'stack> VM<'stack> {
                     {
                         *i as usize
                     } else {
-                        panic!("Failed to fetch operand of OpJump")
+                        panic!("Failed to fetch operand of OpJump.")
                     };
 
                     match op {
                         Op::Jump => {
                             ip += next_ins;
+                            // Short-circuit to skip over the default increment of 1 after every instruction.
+                            continue;
                         }
                         Op::JumpMaybe => {
-                            let cond = self.pop();
-                            match cond {
-                                Object::Boolean(b) => {
-                                    if !*b {
-                                        // Increment ip, if the condition evaluated to false.
-                                        ip += next_ins;
-                                        // Short-circuit to skip over the default increment of 1 after every instruction.
-                                        continue;
-                                    } else {
-                                        // Need to jump over the operand bytes, if the condition evaluated to true.
-                                        ip += 2;
-                                    }
-                                }
-                                _ => panic!("Conditional Jump not preceeded by a Boolean."),
+                            /*
+                             * Interpret top of the Stack Object as a Boolean.
+                             * NOTE This can never fail, since everything on the Stack
+                             * is an Object, and every object can be interpreted as a Boolean.
+                             */
+                            let cond = self.pop().as_bool();
+                            if cond {
+                                // Need to jump over the operand bytes, if the condition evaluated to true.
+                                ip += 2;
+                            } else {
+                                // Increment ip, if the condition evaluated to false.
+                                ip += next_ins;
+                                // Short-circuit to skip over the default increment of 1 after every instruction.
+                                continue;
                             }
                         }
                         _ => unreachable!(),
@@ -234,7 +239,7 @@ mod vm_tests {
         }
 
         pub fn test_integer_object(a: &Object, e: &Object) {
-            assert!(matches!(e, Object::Integer(..)));
+            assert!(matches!(a, Object::Integer(..)));
             if let Object::Integer(i) = a {
                 if let Object::Integer(j) = e {
                     assert_eq!(i, j);
@@ -243,12 +248,16 @@ mod vm_tests {
         }
 
         pub fn test_boolean_object(a: &Object, e: &Object) {
-            assert!(matches!(e, Object::Boolean(..)));
+            assert!(matches!(a, Object::Boolean(..)));
             if let Object::Boolean(i) = a {
                 if let Object::Boolean(j) = e {
                     assert_eq!(i, j);
                 }
             }
+        }
+
+        pub fn test_null_object(a: &Object, e: &Object) {
+            assert!(matches!(a, Object::Null));
         }
 
         pub struct VMCase<'s> {
@@ -267,9 +276,6 @@ mod vm_tests {
                 let mut vm = VM::new(compiler.bytecode(), &mut stack);
                 vm.run();
 
-                println!("{}", vm.stack);
-                println!("{}", vm.instructions);
-
                 // Confirmation
                 let top = vm.last_popped_obj();
                 test_expected_object(top, &case.expected);
@@ -278,9 +284,10 @@ mod vm_tests {
 
         pub fn test_expected_object(actual: &Object, expected: &Object) {
             use Object::*;
-            match actual {
+            match expected {
                 Integer(_) => test_integer_object(actual, expected),
                 Boolean(_) => test_boolean_object(actual, expected),
+                Null => test_null_object(actual, expected),
                 _ => todo!(),
             }
         }
@@ -389,6 +396,10 @@ mod vm_tests {
                     input: "!!!true",
                     expected: Boolean(false),
                 },
+                VMCase {
+                    input: "!(if (false) { 10 };)",
+                    expected: Boolean(true),
+                },
             ];
 
             test_vm_run(&cases);
@@ -400,6 +411,10 @@ mod vm_tests {
                 VMCase {
                     input: "if (true) { 23 }",
                     expected: Integer(23),
+                },
+                VMCase {
+                    input: "if (false) { 23 }",
+                    expected: Null,
                 },
                 VMCase {
                     input: "if (false) { 23 }; 42;",
@@ -414,8 +429,16 @@ mod vm_tests {
                     expected: Integer(42),
                 },
                 VMCase {
-                    input: "if (4 < 8) { 4; 8; 15; 16; 23; 42  } else { 0 }",
+                    input: "if (4 < 8) { 4; 8; 15; 16; 23; 42 } else { 0 }",
                     expected: Integer(42),
+                },
+                VMCase {
+                    input: "if (4 > 8) { 4; 8; 15; 16; 23; 42 } else { 0; 1; 2; }",
+                    expected: Integer(2),
+                },
+                VMCase {
+                    input: "if (if (false) { 10 };) { 10 } else { 20 }",
+                    expected: Integer(20),
                 },
             ];
 
