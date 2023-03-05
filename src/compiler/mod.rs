@@ -1,4 +1,4 @@
-use crate::ast;
+use crate::ast::{self, Node};
 use crate::ast::{Expression, Statement};
 use crate::code::{self, Instructions, Op};
 use crate::object::Object;
@@ -6,6 +6,7 @@ use crate::object::Object::*;
 use ast::Expression::*;
 use ast::Statement::*;
 
+mod symbol_table;
 /*
  * @COMPILER::COMPILER
  */
@@ -13,6 +14,7 @@ use ast::Statement::*;
 pub struct Compiler {
     instructions: code::Instructions,
     constants: Vec<Object>,
+    table: symbol_table::SymbolTable,
 }
 
 impl Compiler {
@@ -27,12 +29,8 @@ impl Compiler {
 
     fn c_statement(&mut self, stmt: &Statement) {
         match stmt {
-            Expr(_, e) => {
-                self.c_expression(e);
-
-                // Don't add unnecessary Pop after If
-                // if !matches!(e, Expression::If(..)) {
-                // }
+            Expr(_, expr) => {
+                self.c_expression(expr);
                 self.emit(Op::Pop, None);
             }
             Block(_, statements) => {
@@ -40,12 +38,27 @@ impl Compiler {
                     self.c_statement(statement);
                 }
             }
+            Let(_, name, expr) => {
+                self.c_expression(expr);
+                // NOTE This unwrap cannot fail.
+                let symbol = self.table.define(&name.to_string());
+                self.emit(Op::SetGlobal, Some(&[symbol.index]));
+            }
             _ => todo!(),
         }
     }
 
     fn c_expression(&mut self, expr: &Expression) {
         match expr {
+            Identifier(_, name) => {
+                let index = if let Some(symbol) = self.table.resolve(name) {
+                    symbol.index
+                } else {
+                    panic!("No binding found for symbol with name {name}");
+                };
+
+                self.emit(Op::GetGlobal, Some(&[index]));
+            }
             Bool(_, b) => {
                 if (*b) {
                     self.emit(Op::True, None);
@@ -471,6 +484,55 @@ mod tests {
 
         test_compiler_cases(&cases);
     }
+
+    #[test]
+    fn test_let_statement() {
+        use code::make;
+        let cases = [
+            CompilerCase {
+                input: "let x = 1;",
+                expected_constants: vec![Integer(1)],
+                expected_instructions: &[make(Constant, Some(&[0])), make(SetGlobal, Some(&[0]))],
+            },
+            CompilerCase {
+                input: "let x = 1; x;",
+                expected_constants: vec![Integer(1)],
+                expected_instructions: &[
+                    make(Constant, Some(&[0])),
+                    make(SetGlobal, Some(&[0])),
+                    make(GetGlobal, Some(&[0])),
+                    make(Pop, None),
+                ],
+            },
+            CompilerCase {
+                input: "let x = 1; let y = 2;",
+                expected_constants: vec![Integer(1), Integer(2)],
+                expected_instructions: &[
+                    make(Constant, Some(&[0])),
+                    make(SetGlobal, Some(&[0])),
+                    make(Constant, Some(&[1])),
+                    make(SetGlobal, Some(&[1])),
+                ],
+            },
+            CompilerCase {
+                input: "let x = 1; let y = 2; let z = x + y;",
+                expected_constants: vec![Integer(1), Integer(2)],
+                expected_instructions: &[
+                    make(Constant, Some(&[0])),
+                    make(SetGlobal, Some(&[0])),
+                    make(Constant, Some(&[1])),
+                    make(SetGlobal, Some(&[1])),
+                    make(GetGlobal, Some(&[0])),
+                    make(GetGlobal, Some(&[1])),
+                    make(Add, None),
+                    make(SetGlobal, Some(&[2])),
+                ],
+            },
+        ];
+
+        test_compiler_cases(&cases);
+    }
+
     fn test_compiler_cases(cases: &[CompilerCase]) {
         for case in cases {
             let program = parse(case.input);

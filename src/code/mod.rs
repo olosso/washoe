@@ -92,6 +92,8 @@ pub enum Op {
     Jump = 13,
     JumpMaybe = 14,
     Null = 15,
+    SetGlobal = 16,
+    GetGlobal = 17,
 }
 
 impl fmt::Display for Op {
@@ -126,6 +128,8 @@ impl TryFrom<u8> for Op {
             13 => Self::Jump,
             14 => Self::JumpMaybe,
             15 => Self::Null,
+            16 => Self::SetGlobal,
+            17 => Self::GetGlobal,
             _ => return Err("No Opcode corresponding to byte found."),
         };
 
@@ -268,6 +272,20 @@ lazy_static! {
             Definition {
                 name: "OpNull",
                 operand_widths: &[]
+            }
+        ),
+        (
+            Op::GetGlobal,
+            Definition {
+                name: "OpGetGlobal",
+                operand_widths: &[2]
+            }
+        ),
+        (
+            Op::SetGlobal,
+            Definition {
+                name: "OpSetGlobal",
+                operand_widths: &[2]
             }
         )
     ]);
