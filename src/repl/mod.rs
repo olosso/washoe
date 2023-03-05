@@ -32,8 +32,8 @@ impl REPL {
                 Ok(program) => {
                     let mut compiler = Compiler::default();
                     compiler.compile(program);
-                    let mut stack = Stack::new();
-                    let mut vm = VM::new(compiler.bytecode(), &mut stack);
+                    let mut stack = stack::Stack::new();
+                    let mut vm = vm::VM::new(compiler.bytecode(), &mut stack);
                     vm.run();
                     let top = vm.last_popped_obj();
                     println!("{top:?}");
