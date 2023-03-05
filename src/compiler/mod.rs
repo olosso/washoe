@@ -31,9 +31,9 @@ impl Compiler {
                 self.c_expression(e);
 
                 // Don't add unnecessary Pop after If
-                if !matches!(e, Expression::If(..)) {
-                    self.emit(Op::Pop, None);
-                }
+                // if !matches!(e, Expression::If(..)) {
+                // }
+                self.emit(Op::Pop, None);
             }
             Block(_, statements) => {
                 for statement in statements {
@@ -98,22 +98,28 @@ impl Compiler {
 
                 self.c_statement(cons);
 
+                // Remove Pop of the last expression in the condition block
+                self.instructions.pop();
+
                 // jump offset
                 let mut cons_len = self.instructions.len() as i32 - jump_cond_ins as i32;
 
+                let jump_uncond_obj = [self.add_constant(Object::Null) as u32];
+                let jump_uncond_ins = self.emit(Op::Jump, Some(&jump_uncond_obj));
                 if let Some(alt) = alt {
-                    let jump_uncond_obj = [self.add_constant(Object::Null) as u32];
-                    let jump_uncond_ins = self.emit(Op::Jump, Some(&jump_uncond_obj));
                     self.c_statement(alt);
-                    self.constants[jump_uncond_obj[0] as usize] =
-                        Integer(self.instructions.len() as i32 - jump_uncond_ins as i32);
-
-                    /*
-                     * Add three to the conditional offset,
-                     * to get over the unconditional Jump we just added.
-                     */
-                    cons_len += 3;
+                    // Remove Pop of the last expression in the alternative block
+                    self.instructions.pop();
+                } else {
+                    self.emit(Op::Null, None);
                 };
+                self.constants[jump_uncond_obj[0] as usize] =
+                    Integer(self.instructions.len() as i32 - jump_uncond_ins as i32);
+                /*
+                 * Add three to the conditional offset,
+                 * to get over the unconditional Jump we just added.
+                 */
+                cons_len += 3;
 
                 self.constants[jump_cond_obj[0] as usize] = Integer(cons_len);
             }
@@ -350,8 +356,9 @@ mod tests {
                 expected_constants: vec![
                     Integer(4),
                     Integer(8),
-                    Integer(7), // JumpMaybe offset
+                    Integer(9), // JumpMaybe offset
                     Integer(10),
+                    Integer(4), // Jump offset
                     Integer(666),
                 ],
                 expected_instructions: &[
@@ -361,31 +368,38 @@ mod tests {
                     make(Constant, Some(&[1])),
                     // 0006 OpGT
                     make(GT, None),
-                    // 0007 JumpMaybe 7
+                    // 0007 JumpMaybe 10
                     make(JumpMaybe, Some(&[2])),
-                    // 0010 OpConstant 4
+                    // 0010 OpConstant 10
                     make(Constant, Some(&[3])),
-                    // 0013 OpPop
-                    make(Pop, None),
-                    // 0014 OpConstant 666
-                    make(Constant, Some(&[4])),
+                    // 0013 Jump 5
+                    make(Jump, Some(&[4])),
+                    // 0016 OpNull
+                    make(Op::Null, None),
                     // 0017 OpPop
+                    make(Pop, None),
+                    // 0018 OpConstant
+                    make(Constant, Some(&[5])),
+                    // 0021 OpPop
                     make(Pop, None),
                 ],
             },
             CompilerCase {
                 input: "if (false) { 10 }; 666;",
                 expected_constants: vec![
-                    Integer(7), // JumpMaybe offset
+                    Integer(9), // JumpMaybe offset
                     Integer(10),
+                    Integer(4), // Jump offset
                     Integer(666),
                 ],
                 expected_instructions: &[
                     make(False, None),
                     make(JumpMaybe, Some(&[0])),
                     make(Constant, Some(&[1])),
+                    make(Jump, Some(&[2])),
+                    make(Op::Null, None),
                     make(Pop, None),
-                    make(Constant, Some(&[2])),
+                    make(Constant, Some(&[3])),
                     make(Pop, None),
                 ],
             },
@@ -394,9 +408,9 @@ mod tests {
                 expected_constants: vec![
                     Integer(4),
                     Integer(8),
-                    Integer(10), // JumpMaybe offset
+                    Integer(9), // JumpMaybe offset
                     Integer(42),
-                    Integer(7), // Jump offset
+                    Integer(6), // Jump offset
                     Integer(23),
                     Integer(666),
                 ],
@@ -411,8 +425,6 @@ mod tests {
                     make(JumpMaybe, Some(&[2])),
                     // 0010 OpConstant 42
                     make(Constant, Some(&[3])),
-                    // 0013 OpPop
-                    make(Pop, None),
                     // 0014 OpJump 6
                     make(Jump, Some(&[4])),
                     // 0017 OpConstant 23
@@ -426,13 +438,15 @@ mod tests {
                 ],
             },
             CompilerCase {
-                input: "if (4 < 8) { 42 } else { 23 }; 666;",
+                input: "if (4 < 8) { 42; 4; 8; } else { 23 }; 666;",
                 expected_constants: vec![
                     Integer(8),
                     Integer(4),
-                    Integer(10), // JumpMaybe offset
+                    Integer(17), // JumpMaybe offset
                     Integer(42),
-                    Integer(7), // Jump offset
+                    Integer(4),
+                    Integer(8),
+                    Integer(6), // Jump offset
                     Integer(23),
                     Integer(666),
                 ],
@@ -443,10 +457,13 @@ mod tests {
                     make(JumpMaybe, Some(&[2])),
                     make(Constant, Some(&[3])),
                     make(Pop, None),
-                    make(Jump, Some(&[4])),
-                    make(Constant, Some(&[5])),
+                    make(Constant, Some(&[4])),
                     make(Pop, None),
-                    make(Constant, Some(&[6])),
+                    make(Constant, Some(&[5])),
+                    make(Jump, Some(&[6])),
+                    make(Constant, Some(&[7])),
+                    make(Pop, None),
+                    make(Constant, Some(&[8])),
                     make(Pop, None),
                 ],
             },
@@ -495,8 +512,6 @@ mod tests {
     fn test_instructions(actual: code::Instructions, expected: &[code::Instructions]) {
         let concat = concat_instructions(expected);
 
-        println!("{}", actual);
-        println!("{}", concat);
         assert_eq!(
             actual.len(),
             concat.len(),
