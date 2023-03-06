@@ -8,24 +8,31 @@ use crate::{
     object::Object,
 };
 
+use super::globals::{Globals, GLOBALS_SIZE};
 use super::stack::{Stack, STACK_SIZE};
 
 /*
  * @VM::VM
  */
 #[derive(Debug)]
-pub struct VM<'stack> {
+pub struct VM<'stack, 'globals> {
     constants: Vec<Object>,
     instructions: Instructions,
+    globals: &'globals mut Globals,
     stack: &'stack mut Stack,
     sp: usize,
 }
 
-impl<'stack> VM<'stack> {
-    pub fn new(bytecode: Bytecode, stack: &'stack mut Stack) -> Self {
+impl<'stack, 'globals> VM<'stack, 'globals> {
+    pub fn new(
+        bytecode: Bytecode,
+        globals: &'globals mut Globals,
+        stack: &'stack mut Stack,
+    ) -> Self {
         VM {
             constants: bytecode.constants,
             instructions: bytecode.instructions,
+            globals,
             stack,
             sp: 0,
         }
@@ -47,6 +54,21 @@ impl<'stack> VM<'stack> {
             let op = Op::try_from(self.instructions[ip]).unwrap();
 
             match op {
+                Op::Pop => {
+                    self.pop();
+                }
+                Op::SetGlobal => {
+                    let global_index = read_uint16(&self.instructions, ip + 1) as usize;
+                    ip += 2;
+
+                    self.globals[global_index] = self.pop().clone();
+                }
+                Op::GetGlobal => {
+                    let global_index = read_uint16(&self.instructions, ip + 1) as usize;
+                    ip += 2;
+
+                    self.push(self.globals[global_index].clone());
+                }
                 Op::Null => {
                     self.push(Object::Null);
                 }
@@ -142,9 +164,6 @@ impl<'stack> VM<'stack> {
                         }
                         _ => unreachable!(),
                     }
-                }
-                Op::Pop => {
-                    self.pop();
                 }
                 _ => todo!(),
             }

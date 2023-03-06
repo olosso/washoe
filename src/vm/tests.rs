@@ -4,6 +4,7 @@ mod vm_tests {
     use crate::compiler::Compiler;
     use crate::object::Object;
     use crate::object::Object::*;
+    use crate::vm::globals::Globals;
     use crate::vm::stack::Stack;
     use crate::vm::vm::VM;
 
@@ -51,8 +52,9 @@ mod vm_tests {
                 // Generation
                 let mut compiler = Compiler::default();
                 compiler.compile(program);
+                let mut globals = Globals::new();
                 let mut stack = Stack::new();
-                let mut vm = VM::new(compiler.bytecode(), &mut stack);
+                let mut vm = VM::new(compiler.bytecode(), &mut globals, &mut stack);
                 vm.run();
 
                 // Confirmation
@@ -218,6 +220,26 @@ mod vm_tests {
                 VMCase {
                     input: "if (if (false) { 10 };) { 10 } else { 20 }",
                     expected: Integer(20),
+                },
+            ];
+
+            test_vm_run(&cases);
+        }
+
+        #[test]
+        fn test_global_let() {
+            let cases = [
+                VMCase {
+                    input: "let x = 1; x;",
+                    expected: Integer(1),
+                },
+                VMCase {
+                    input: "let x = 1; let y = x; y",
+                    expected: Integer(1),
+                },
+                VMCase {
+                    input: "let x = 1; let y = 2; let z = x + y; z",
+                    expected: Integer(3),
                 },
             ];
 

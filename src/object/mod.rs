@@ -426,3 +426,14 @@ impl Environment {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn size_of_obj() {
+        // Checked this out of curiosity.
+        assert_eq!(std::mem::size_of::<Object>(), 248);
+    }
+}
