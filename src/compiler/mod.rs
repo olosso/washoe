@@ -82,6 +82,13 @@ impl Compiler {
                 }
                 self.emit(Op::BuildArray, Some(&[expressions.len() as u32]));
             }
+            Expression::HashMap(_, keys, values) => {
+                for (key, val) in keys.iter().zip(values) {
+                    self.c_expression(key);
+                    self.c_expression(val);
+                }
+                self.emit(Op::BuildHashMap, Some(&[(keys.len() * 2) as u32]));
+            }
             Prefix(_, op, r) => {
                 self.c_expression(r);
 
@@ -609,6 +616,70 @@ mod tests {
                     make(Constant, Some(&[5])),
                     make(Add, None),
                     make(BuildArray, Some(&[3])),
+                    make(Pop, None),
+                ],
+            },
+        ];
+
+        test_compiler_cases(&cases);
+    }
+
+    #[test]
+    fn hashmap_compilation() {
+        use code::make;
+        let cases = [
+            CompilerCase {
+                input: "{}",
+                expected_constants: vec![],
+                expected_instructions: &[make(BuildHashMap, Some(&[0])), make(Pop, None)],
+            },
+            CompilerCase {
+                input: "{1: 10, 2: 20, 3: 30}",
+                expected_constants: vec![
+                    Integer(1),
+                    Integer(10),
+                    Integer(2),
+                    Integer(20),
+                    Integer(3),
+                    Integer(30),
+                ],
+                expected_instructions: &[
+                    make(Constant, Some(&[0])),
+                    make(Constant, Some(&[1])),
+                    make(Constant, Some(&[2])),
+                    make(Constant, Some(&[3])),
+                    make(Constant, Some(&[4])),
+                    make(Constant, Some(&[5])),
+                    make(BuildHashMap, Some(&[6])),
+                    make(Pop, None),
+                ],
+            },
+            CompilerCase {
+                input: "{1 + 2: 10 + 1, 2 + 2: 20 + 1}",
+                expected_constants: vec![
+                    Integer(1),
+                    Integer(2),
+                    Integer(10),
+                    Integer(1),
+                    Integer(2),
+                    Integer(2),
+                    Integer(20),
+                    Integer(1),
+                ],
+                expected_instructions: &[
+                    make(Constant, Some(&[0])),
+                    make(Constant, Some(&[1])),
+                    make(Add, None),
+                    make(Constant, Some(&[2])),
+                    make(Constant, Some(&[3])),
+                    make(Add, None),
+                    make(Constant, Some(&[4])),
+                    make(Constant, Some(&[5])),
+                    make(Add, None),
+                    make(Constant, Some(&[6])),
+                    make(Constant, Some(&[7])),
+                    make(Add, None),
+                    make(BuildHashMap, Some(&[4])),
                     make(Pop, None),
                 ],
             },

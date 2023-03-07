@@ -60,6 +60,17 @@ mod vm_tests {
             }
         }
 
+        pub fn test_hashmap_object(a: &Object, e: &Object) {
+            assert!(matches!(a, Object::HashMap(_)));
+            dbg!(a);
+            dbg!(e);
+            if let Object::HashMap(hm_i) = a {
+                if let Object::HashMap(hm_j) = e {
+                    assert!(hm_i == hm_j)
+                }
+            }
+        }
+
         pub struct VMCase<'s> {
             pub input: &'s str,
             pub expected: Object,
@@ -91,12 +102,15 @@ mod vm_tests {
                 Boolean(_) => test_boolean_object(actual, expected),
                 Null => test_null_object(actual, expected),
                 Array(_) => test_array_object(actual, expected),
+                HashMap(_) => test_hashmap_object(actual, expected),
                 _ => todo!(),
             }
         }
     }
 
     mod tests {
+        use std::collections::HashMap;
+
         use super::helpers::*;
         use super::*;
 
@@ -298,6 +312,33 @@ mod vm_tests {
                 VMCase {
                     input: "[1 + 10, 2 + 20, 3 + 30]",
                     expected: Array(vec![Integer(11), Integer(22), Integer(33)]),
+                },
+            ];
+
+            test_vm_run(&cases);
+        }
+
+        #[test]
+        fn test_hashmap_expressions() {
+            let cases = [
+                VMCase {
+                    input: "{}",
+                    expected: HashMap(HashMap::new()),
+                },
+                VMCase {
+                    input: "{1: 10, 2: 20, 3: 30}",
+                    expected: HashMap(HashMap::from([
+                        (Integer(1), Integer(10)),
+                        (Integer(2), Integer(20)),
+                        (Integer(3), Integer(30)),
+                    ])),
+                },
+                VMCase {
+                    input: "{1 + 2: 10 + 1, 2 + 2: 20 + 1}",
+                    expected: HashMap(HashMap::from([
+                        (Integer(3), Integer(11)),
+                        (Integer(4), Integer(21)),
+                    ])),
                 },
             ];
 

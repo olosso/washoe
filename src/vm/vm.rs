@@ -100,11 +100,27 @@ impl<'stack, 'globals> VM<'stack, 'globals> {
                     for i in (self.sp - array_size)..self.sp {
                         array_objs.push(self.stack[i].clone());
                     }
-                    // NOTE The stack pointer is adjusted since n elements were "poppped" of the stack.
+                    // NOTE The stack pointer is adjusted since n elements were "popped" of the stack.
                     self.sp -= array_size;
 
                     let arr = Object::Array(array_objs);
                     self.push(arr);
+                }
+                Op::BuildHashMap => {
+                    let hashmap_size = read_uint16(&self.instructions, ip + 1) as usize;
+                    ip += 2;
+
+                    let mut hm = std::collections::HashMap::new();
+                    for i in ((self.sp - hashmap_size)..self.sp).step_by(2) {
+                        let key = self.stack[i].clone();
+                        let val = self.stack[i + 1].clone();
+                        hm.insert(key, val);
+                    }
+                    // NOTE The stack pointer is adjusted since n elements were "popped" of the stack.
+                    self.sp -= hashmap_size;
+
+                    let hm = Object::HashMap(hm);
+                    self.push(hm);
                 }
                 Op::Minus | Op::Bang => {
                     let right = self.pop();
@@ -187,7 +203,7 @@ impl<'stack, 'globals> VM<'stack, 'globals> {
                 _ => todo!(),
             }
 
-            // NOTE I'm here!
+            // NOTE I'm here! Don't forget about me!
             ip += 1;
         }
     }
