@@ -27,6 +27,15 @@ mod vm_tests {
             }
         }
 
+        pub fn test_string_object(a: &Object, e: &Object) {
+            assert!(matches!(a, Object::String(..)));
+            if let Object::String(i) = a {
+                if let Object::String(j) = e {
+                    assert_eq!(i, j);
+                }
+            }
+        }
+
         pub fn test_boolean_object(a: &Object, e: &Object) {
             assert!(matches!(a, Object::Boolean(..)));
             if let Object::Boolean(i) = a {
@@ -67,6 +76,7 @@ mod vm_tests {
             use Object::*;
             match expected {
                 Integer(_) => test_integer_object(actual, expected),
+                String(_) => test_string_object(actual, expected),
                 Boolean(_) => test_boolean_object(actual, expected),
                 Null => test_null_object(actual, expected),
                 _ => todo!(),
@@ -240,6 +250,22 @@ mod vm_tests {
                 VMCase {
                     input: "let x = 1; let y = 2; let z = x + y; z",
                     expected: Integer(3),
+                },
+            ];
+
+            test_vm_run(&cases);
+        }
+
+        #[test]
+        fn test_string_expressions() {
+            let cases = [
+                VMCase {
+                    input: r#" "yoyo"; "#,
+                    expected: String("yoyo".to_string()),
+                },
+                VMCase {
+                    input: r#" "yo" + "yo"; "#,
+                    expected: String("yoyo".to_string()),
                 },
             ];
 

@@ -71,6 +71,11 @@ impl Compiler {
                 let pos = [self.add_constant(obj) as u32];
                 self.emit(Op::Constant, Some(&pos));
             }
+            StringLiteral(_, string) => {
+                let obj = String(string.to_string());
+                let pos = [self.add_constant(obj) as u32];
+                self.emit(Op::Constant, Some(&pos));
+            }
             Prefix(_, op, r) => {
                 self.c_expression(r);
 
@@ -533,6 +538,30 @@ mod tests {
         test_compiler_cases(&cases);
     }
 
+    #[test]
+    fn test_string_literals() {
+        use code::make;
+        let cases = [
+            CompilerCase {
+                input: r#""yoyo";"#,
+                expected_constants: vec![String("yoyo".to_string())],
+                expected_instructions: &[make(Constant, Some(&[0])), make(Pop, None)],
+            },
+            CompilerCase {
+                input: r#""yo" + "yo";"#,
+                expected_constants: vec![String("yo".to_string()), String("yo".to_string())],
+                expected_instructions: &[
+                    make(Constant, Some(&[0])),
+                    make(Constant, Some(&[1])),
+                    make(Add, None),
+                    make(Pop, None),
+                ],
+            },
+        ];
+
+        test_compiler_cases(&cases);
+    }
+
     fn test_compiler_cases(cases: &[CompilerCase]) {
         for case in cases {
             let program = parse(case.input);
@@ -557,6 +586,7 @@ mod tests {
         for (a, e) in actual.iter().zip(expected) {
             match a {
                 Integer(i) => test_integer_object(a, e),
+                String(s) => test_string_object(a, e),
                 _ => todo!(),
             }
         }
@@ -566,6 +596,15 @@ mod tests {
         assert!(matches!(e, Object::Integer(..)));
         if let Object::Integer(i) = a {
             if let Object::Integer(j) = e {
+                assert_eq!(i, j, "Constant pool not the same.");
+            }
+        }
+    }
+
+    fn test_string_object(a: &Object, e: &Object) {
+        assert!(matches!(e, Object::String(..)));
+        if let Object::String(i) = a {
+            if let Object::String(j) = e {
                 assert_eq!(i, j, "Constant pool not the same.");
             }
         }

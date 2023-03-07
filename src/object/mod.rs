@@ -234,12 +234,30 @@ impl Object {
         }
     }
 
-    pub fn add(left: &Object, right: &Object) -> Object {
-        let (l, r) = Self::unwrap_ints(left, right)
-            .expect("Non-numeric operands to given to numeric operation.");
-
-        Object::Integer(l + r)
+    fn unwrap_strings(left: &Object, right: &Object) -> Option<(String, String)> {
+        if let Object::String(a) = left {
+            if let Object::String(b) = right {
+                Some((a.clone(), b.clone()))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
     }
+
+    pub fn add(left: &Object, right: &Object) -> Object {
+        let objs = Self::unwrap_ints(left, right);
+        if objs.is_none() {
+            let (l, r) = Self::unwrap_strings(left, right)
+                .expect("+ operator only supported for Integers and Strings.");
+            Object::String(l + &r)
+        } else {
+            let (l, r) = Self::unwrap_ints(left, right).unwrap();
+            Object::Integer(l + r)
+        }
+    }
+
     pub fn sub(left: &Object, right: &Object) -> Object {
         let (l, r) = Self::unwrap_ints(left, right)
             .expect("Non-numeric operands to given to numeric operation.");
