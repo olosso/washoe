@@ -87,6 +87,25 @@ impl<'stack, 'globals> VM<'stack, 'globals> {
                         self.push(Object::Boolean(false))
                     }
                 }
+                Op::BuildArray => {
+                    let array_size = read_uint16(&self.instructions, ip + 1) as usize;
+                    ip += 2;
+
+                    /*
+                     * To create an Array, the stack is read from top to bottom (or bottom to top, since
+                     * the stack grows upwards). Anyway, the point is that the elements aren't simply
+                     * popped of the stack, since then the array elements would be in reverse order.
+                     */
+                    let mut array_objs = vec![];
+                    for i in (self.sp - array_size)..self.sp {
+                        array_objs.push(self.stack[i].clone());
+                    }
+                    // NOTE The stack pointer is adjusted since n elements were "poppped" of the stack.
+                    self.sp -= array_size;
+
+                    let arr = Object::Array(array_objs);
+                    self.push(arr);
+                }
                 Op::Minus | Op::Bang => {
                     let right = self.pop();
 

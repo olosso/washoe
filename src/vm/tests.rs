@@ -49,6 +49,17 @@ mod vm_tests {
             assert!(matches!(a, Object::Null));
         }
 
+        pub fn test_array_object(a: &Object, e: &Object) {
+            assert!(matches!(a, Object::Array(_)));
+            if let Object::Array(objs_i) = a {
+                if let Object::Array(objs_j) = e {
+                    for (i, j) in objs_i.iter().zip(objs_j) {
+                        test_expected_object(i, j);
+                    }
+                }
+            }
+        }
+
         pub struct VMCase<'s> {
             pub input: &'s str,
             pub expected: Object,
@@ -79,6 +90,7 @@ mod vm_tests {
                 String(_) => test_string_object(actual, expected),
                 Boolean(_) => test_boolean_object(actual, expected),
                 Null => test_null_object(actual, expected),
+                Array(_) => test_array_object(actual, expected),
                 _ => todo!(),
             }
         }
@@ -266,6 +278,26 @@ mod vm_tests {
                 VMCase {
                     input: r#" "yo" + "yo"; "#,
                     expected: String("yoyo".to_string()),
+                },
+            ];
+
+            test_vm_run(&cases);
+        }
+
+        #[test]
+        fn test_array_expressions() {
+            let cases = [
+                VMCase {
+                    input: "[]",
+                    expected: Array(vec![]),
+                },
+                VMCase {
+                    input: "[1, 2, 3]",
+                    expected: Array(vec![Integer(1), Integer(2), Integer(3)]),
+                },
+                VMCase {
+                    input: "[1 + 10, 2 + 20, 3 + 30]",
+                    expected: Array(vec![Integer(11), Integer(22), Integer(33)]),
                 },
             ];
 

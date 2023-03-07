@@ -76,6 +76,12 @@ impl Compiler {
                 let pos = [self.add_constant(obj) as u32];
                 self.emit(Op::Constant, Some(&pos));
             }
+            Expression::Array(_, expressions) => {
+                for expression in expressions {
+                    self.c_expression(expression);
+                }
+                self.emit(Op::BuildArray, Some(&[expressions.len() as u32]));
+            }
             Prefix(_, op, r) => {
                 self.c_expression(r);
 
@@ -554,6 +560,55 @@ mod tests {
                     make(Constant, Some(&[0])),
                     make(Constant, Some(&[1])),
                     make(Add, None),
+                    make(Pop, None),
+                ],
+            },
+        ];
+
+        test_compiler_cases(&cases);
+    }
+
+    #[test]
+    fn array_compilation() {
+        use code::make;
+        let cases = [
+            CompilerCase {
+                input: "[]",
+                expected_constants: vec![],
+                expected_instructions: &[make(BuildArray, Some(&[0])), make(Pop, None)],
+            },
+            CompilerCase {
+                input: "[1, 2, 3]",
+                expected_constants: vec![Integer(1), Integer(2), Integer(3)],
+                expected_instructions: &[
+                    make(Constant, Some(&[0])),
+                    make(Constant, Some(&[1])),
+                    make(Constant, Some(&[2])),
+                    make(BuildArray, Some(&[3])),
+                    make(Pop, None),
+                ],
+            },
+            CompilerCase {
+                input: "[1 + 10, 2 + 20, 3 + 30]",
+                expected_constants: vec![
+                    Integer(1),
+                    Integer(10),
+                    Integer(2),
+                    Integer(20),
+                    Integer(3),
+                    Integer(30),
+                ],
+                expected_instructions: &[
+                    make(Constant, Some(&[0])),
+                    make(Constant, Some(&[1])),
+                    make(Add, None),
+                    make(Constant, Some(&[2])),
+                    make(Constant, Some(&[3])),
+                    make(Add, None),
+                    make(Constant, Some(&[4])),
+                    make(Constant, Some(&[5])),
+                    make(Add, None),
+                    make(BuildArray, Some(&[3])),
                     make(Pop, None),
                 ],
             },

@@ -94,6 +94,7 @@ pub enum Op {
     Null = 15,
     SetGlobal = 16,
     GetGlobal = 17,
+    BuildArray = 18,
 }
 
 impl fmt::Display for Op {
@@ -130,6 +131,7 @@ impl TryFrom<u8> for Op {
             15 => Self::Null,
             16 => Self::SetGlobal,
             17 => Self::GetGlobal,
+            18 => Self::BuildArray,
             _ => return Err("No Opcode corresponding to byte found."),
         };
 
@@ -287,7 +289,15 @@ lazy_static! {
                 name: "OpSetGlobal",
                 operand_widths: &[2]
             }
-        )
+        ),
+        (
+            Op::BuildArray,
+            Definition {
+                name: "OpBuildArray",
+                operand_widths: &[2]
+            }
+        ),
+
     ]);
 }
 
