@@ -89,6 +89,11 @@ impl Compiler {
                 }
                 self.emit(Op::BuildHashMap, Some(&[(keys.len() * 2) as u32]));
             }
+            Index(_, container, index) => {
+                self.c_expression(container);
+                self.c_expression(index);
+                self.emit(Op::Index, None);
+            }
             Prefix(_, op, r) => {
                 self.c_expression(r);
 
@@ -680,6 +685,49 @@ mod tests {
                     make(Constant, Some(&[7])),
                     make(Add, None),
                     make(BuildHashMap, Some(&[4])),
+                    make(Pop, None),
+                ],
+            },
+        ];
+
+        test_compiler_cases(&cases);
+    }
+
+    #[test]
+    fn indexing_compilation() {
+        use code::make;
+        let cases = [
+            CompilerCase {
+                input: "[][0]",
+                expected_constants: vec![Integer(0)],
+                expected_instructions: &[
+                    make(BuildArray, Some(&[0])),
+                    make(Constant, Some(&[0])),
+                    make(Op::Index, None),
+                    make(Pop, None),
+                ],
+            },
+            CompilerCase {
+                input: "[1,2][0]",
+                expected_constants: vec![Integer(1), Integer(2), Integer(0)],
+                expected_instructions: &[
+                    make(Constant, Some(&[0])),
+                    make(Constant, Some(&[1])),
+                    make(BuildArray, Some(&[2])),
+                    make(Constant, Some(&[2])),
+                    make(Op::Index, None),
+                    make(Pop, None),
+                ],
+            },
+            CompilerCase {
+                input: "{1: 10}[1]",
+                expected_constants: vec![Integer(1), Integer(10), Integer(1)],
+                expected_instructions: &[
+                    make(Constant, Some(&[0])),
+                    make(Constant, Some(&[1])),
+                    make(BuildHashMap, Some(&[2])),
+                    make(Constant, Some(&[2])),
+                    make(Op::Index, None),
                     make(Pop, None),
                 ],
             },

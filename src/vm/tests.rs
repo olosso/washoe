@@ -344,5 +344,41 @@ mod vm_tests {
 
             test_vm_run(&cases);
         }
+
+        #[test]
+        fn test_indexing_expressions() {
+            let cases = [
+                VMCase {
+                    input: "[1][0]",
+                    expected: Integer(1),
+                },
+                VMCase {
+                    input: "[][0]",
+                    expected: Null,
+                },
+                VMCase {
+                    input: "{1: 10, 2: 20, 3: 30}[1]",
+                    expected: Integer(10),
+                },
+                VMCase {
+                    input: "{1: 10, 2: 20, 3: 30}[1 + 1]",
+                    expected: Integer(20),
+                },
+                VMCase {
+                    input: "[1, 2, 3][-1]",
+                    expected: Null,
+                },
+                VMCase {
+                    input: "{1: 10, 2: 20, 3: 30}[100]",
+                    expected: Null,
+                },
+                VMCase {
+                    input: "[[1, 2, 3]][0][0]",
+                    expected: Integer(1),
+                },
+            ];
+
+            test_vm_run(&cases);
+        }
     }
 }

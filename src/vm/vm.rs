@@ -122,6 +122,45 @@ impl<'stack, 'globals> VM<'stack, 'globals> {
                     let hm = Object::HashMap(hm);
                     self.push(hm);
                 }
+                Op::Index => {
+                    let index = self.pop().clone();
+                    let container = self.pop().clone();
+
+                    // REFACTOR Refactor this for the love of God.
+                    let val = match container {
+                        Object::Array(a) => {
+                            if let Object::Integer(i) = index {
+                                if a.is_empty() || i < 0 || i as usize > (a.len() - 1) {
+                                    Object::Null
+                                } else {
+                                    let i = i as usize;
+                                    let val = a.get(i);
+                                    if let Some(val) = val {
+                                        val.clone()
+                                    } else {
+                                        Object::Null
+                                    }
+                                }
+                            } else {
+                                panic!(
+                                    "Tried to index an array with something other than an Integer."
+                                )
+                            }
+                        }
+                        Object::HashMap(hm) => {
+                            let val = hm.get(&index);
+                            if let Some(val) = val {
+                                val.clone()
+                            } else {
+                                Object::Null
+                            }
+                        }
+                        // REVIEW Indexing causes is a runtime error, not a compile time error.
+                        _ => panic!("Tried to index into something other than a Array or HashMap!"),
+                    };
+
+                    self.push(val);
+                }
                 Op::Minus | Op::Bang => {
                     let right = self.pop();
 
