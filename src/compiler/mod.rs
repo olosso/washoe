@@ -156,6 +156,14 @@ impl Compiler {
 
                 self.emit(Op::Constant, Some(&pos));
             }
+            Call(_, func, args) => {
+                /*
+                 * Here "func" can be either a function literal or a name that is bound to
+                 * a function. Either way, the compiler knows how to compile them.
+                 */
+                self.c_expression(func);
+                self.emit(Op::Call, None);
+            }
             Expression::Array(_, expressions) => {
                 for expression in expressions {
                     self.c_expression(expression);
@@ -913,6 +921,53 @@ mod tests {
                     None,
                 )]))],
                 expected_instructions: &[make(Constant, Some(&[0])), make(Pop, None)],
+            },
+        ];
+
+        test_compiler_cases(&cases);
+    }
+
+    #[test]
+    fn function_call_compilation() {
+        use code::make;
+        let cases = [
+            CompilerCase {
+                input: "func() { return 5 + 10; }()",
+                expected_constants: vec![
+                    Integer(5),
+                    Integer(10),
+                    CompiledFn(Instructions::from_list(vec![
+                        make(Constant, Some(&[0])),
+                        make(Constant, Some(&[1])),
+                        make(Add, None),
+                        make(Op::Return, None),
+                    ])),
+                ],
+                expected_instructions: &[
+                    make(Constant, Some(&[2])),
+                    make(Op::Call, None),
+                    make(Pop, None),
+                ],
+            },
+            CompilerCase {
+                input: "let add = func() { 5 + 10; }; add();",
+                expected_constants: vec![
+                    Integer(5),
+                    Integer(10),
+                    CompiledFn(Instructions::from_list(vec![
+                        make(Constant, Some(&[0])),
+                        make(Constant, Some(&[1])),
+                        make(Add, None),
+                        make(Op::Return, None),
+                    ])),
+                ],
+                expected_instructions: &[
+                    make(Constant, Some(&[2])),
+                    make(SetGlobal, Some(&[0])),
+                    make(GetGlobal, Some(&[0])),
+                    make(Op::Call, None),
+                    make(Pop, None),
+                ],
             },
         ];
 
