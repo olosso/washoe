@@ -293,10 +293,12 @@ impl Compiler {
         &mut self.scopes[self.scope_index].instructions
     }
 
+    /// Return the last instruction emitted. Depends on the current scope.
     fn last_instruction(&self) -> &EmittedInstruction {
         &self.scopes[self.scope_index].last_instruction
     }
 
+    /// Return the previous (the one before last) instruction emitted. Depends on the current scope.
     fn previous_instruction(&self) -> &EmittedInstruction {
         &self.scopes[self.scope_index].previous_instruction
     }
