@@ -6,15 +6,63 @@ use crate::object::Object::*;
 use ast::Expression::*;
 use ast::Statement::*;
 
+use self::symbol_table::SymbolTable;
+
 mod symbol_table;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EmittedInstruction {
+    opcode: code::Op,
+    operands: Option<Vec<u32>>,
+}
+
+impl Default for EmittedInstruction {
+    fn default() -> Self {
+        EmittedInstruction {
+            opcode: Op::Null,
+            operands: None,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct CompilationScope {
+    instructions: code::Instructions,
+    last_instruction: EmittedInstruction,
+    previous_instruction: EmittedInstruction,
+}
+
+impl Default for CompilationScope {
+    fn default() -> Self {
+        Self {
+            instructions: Instructions(Vec::new()),
+            last_instruction: EmittedInstruction::default(),
+            previous_instruction: EmittedInstruction::default(),
+        }
+    }
+}
+
 /*
  * @COMPILER::COMPILER
  */
 #[derive(Default, Debug)]
 pub struct Compiler {
-    instructions: code::Instructions,
     constants: Vec<Object>,
     table: symbol_table::SymbolTable,
+
+    scopes: Vec<CompilationScope>,
+    scope_index: usize,
+}
+
+impl Compiler {
+    fn new() -> Self {
+        Compiler {
+            constants: Vec::new(),
+            table: SymbolTable::default(),
+            scopes: vec![CompilationScope::default()], // Start with a "base" scope.
+            scope_index: 0,
+        }
+    }
 }
 
 impl Compiler {
@@ -38,11 +86,22 @@ impl Compiler {
                     self.c_statement(statement);
                 }
             }
+            /*
+             * LetStatements are used to bind symbols to values. All expressions that evaluate to an Object
+             * can be values.
+             * The compiler's job is to keep track of symbols, and give each of them a unique index.
+             * The symbol-index pairs are stored in a SymbolTable. The VM uses the SymbolTable to
+             * resolve each symbol.
+             */
             Let(_, name, expr) => {
                 self.c_expression(expr);
-                // NOTE This unwrap cannot fail.
                 let symbol = self.table.define(&name.to_string());
+                // Op::SetGlobal tells the VM to bind the value on top of the Stack to the index of some symbol.
                 self.emit(Op::SetGlobal, Some(&[symbol.index]));
+            }
+            Statement::Return(_, expr) => {
+                self.c_expression(expr);
+                self.emit(Op::Return, None);
             }
             _ => todo!(),
         }
@@ -74,6 +133,27 @@ impl Compiler {
             StringLiteral(_, string) => {
                 let obj = String(string.to_string());
                 let pos = [self.add_constant(obj) as u32];
+                self.emit(Op::Constant, Some(&pos));
+            }
+            Func(_, params, body) => {
+                self.enter_scope();
+                self.c_statement(body);
+
+                // This block allows the last expression of a function body to omit the "return" keyword.
+                if !matches!(self.last_instruction().opcode, Op::Return) {
+                    /*
+                     * Removing a Pop instruction, that would otherwise be there after an expression.
+                     * The last expression of a Function shouldn't be Popped, since the value of
+                     * that expression will be returned.
+                     */
+                    self.current_instructions().pop();
+                    self.emit(Op::Return, None);
+                };
+
+                let instructions = self.leave_scope();
+                let compiled_fn = CompiledFn(instructions);
+                let pos = [self.add_constant(compiled_fn) as u32];
+
                 self.emit(Op::Constant, Some(&pos));
             }
             Expression::Array(_, expressions) => {
@@ -135,22 +215,22 @@ impl Compiler {
                 self.c_statement(cons);
 
                 // Remove Pop of the last expression in the condition block
-                self.instructions.pop();
+                self.current_instructions().pop();
 
                 // jump offset
-                let mut cons_len = self.instructions.len() as i32 - jump_cond_ins as i32;
+                let mut cons_len = self.current_instructions().len() as i32 - jump_cond_ins as i32;
 
                 let jump_uncond_obj = [self.add_constant(Object::Null) as u32];
                 let jump_uncond_ins = self.emit(Op::Jump, Some(&jump_uncond_obj));
                 if let Some(alt) = alt {
                     self.c_statement(alt);
                     // Remove Pop of the last expression in the alternative block
-                    self.instructions.pop();
+                    self.current_instructions().pop();
                 } else {
                     self.emit(Op::Null, None);
                 };
                 self.constants[jump_uncond_obj[0] as usize] =
-                    Integer(self.instructions.len() as i32 - jump_uncond_ins as i32);
+                    Integer(self.current_instructions().len() as i32 - jump_uncond_ins as i32);
                 /*
                  * Add three to the conditional offset,
                  * to get over the unconditional Jump we just added.
@@ -175,24 +255,66 @@ impl Compiler {
     /// Returns the instruction index of the added instruction.
     fn emit(&mut self, op: code::Op, operands: Option<&[u32]>) -> usize {
         let mut ins = code::make(op, operands);
+
+        self.scopes[self.scope_index].previous_instruction =
+            self.scopes[self.scope_index].last_instruction.clone();
+
+        self.scopes[self.scope_index].last_instruction = EmittedInstruction {
+            opcode: op,
+            operands: operands.map(|x| x.to_vec()),
+        };
+
         self.add_instruction(&mut ins)
     }
 
     /// A helper function for self.emit.
     fn add_instruction(&mut self, ins: &mut Instructions) -> usize {
-        let pos_new_ins = self.instructions.len();
-        self.instructions.append(ins);
+        let pos_new_ins = self.current_instructions().len();
+        self.current_instructions().append(ins);
         pos_new_ins
     }
 
     /// Public function to transfer instructions and constants
     /// to the VM.
     /// NOTE this consumes the Compiler.
-    pub fn bytecode(self) -> Bytecode {
+    pub fn bytecode(mut self) -> Bytecode {
         Bytecode {
-            instructions: self.instructions,
+            instructions: self.current_instructions().clone(),
             constants: self.constants,
         }
+    }
+
+    /*
+     * Dealing with scopes.
+     * Scopes are a neat way to create a set of Instructions in their own context.
+     * These Instructions are then zipped together into a function.
+     */
+    fn current_instructions(&mut self) -> &mut Instructions {
+        &mut self.scopes[self.scope_index].instructions
+    }
+
+    fn last_instruction(&self) -> &EmittedInstruction {
+        &self.scopes[self.scope_index].last_instruction
+    }
+
+    fn previous_instruction(&self) -> &EmittedInstruction {
+        &self.scopes[self.scope_index].previous_instruction
+    }
+
+    /// Before compiling a function, a new scope is created for it.
+    /// Compilation happens in the context of that scope.
+    fn enter_scope(&mut self) {
+        let scope = CompilationScope::default();
+        self.scopes.push(scope);
+        self.scope_index += 1;
+    }
+
+    /// After a function has been compiled, the created scope destroyed.
+    fn leave_scope(&mut self) -> Instructions {
+        let instructions = self.current_instructions().clone();
+        self.scopes.pop();
+        self.scope_index -= 1;
+        instructions
     }
 }
 
@@ -736,10 +858,95 @@ mod tests {
         test_compiler_cases(&cases);
     }
 
+    #[test]
+    fn function_literal_compilation() {
+        use code::make;
+        let cases = [
+            CompilerCase {
+                input: "func() { return 5 + 10; }",
+                expected_constants: vec![
+                    Integer(5),
+                    Integer(10),
+                    CompiledFn(Instructions::from_list(vec![
+                        make(Constant, Some(&[0])),
+                        make(Constant, Some(&[1])),
+                        make(Add, None),
+                        make(Op::Return, None),
+                    ])),
+                ],
+                expected_instructions: &[make(Constant, Some(&[2])), make(Pop, None)],
+            },
+            CompilerCase {
+                input: "func() { 5 + 10; }",
+                expected_constants: vec![
+                    Integer(5),
+                    Integer(10),
+                    CompiledFn(Instructions::from_list(vec![
+                        make(Constant, Some(&[0])),
+                        make(Constant, Some(&[1])),
+                        make(Add, None),
+                        make(Op::Return, None),
+                    ])),
+                ],
+                expected_instructions: &[make(Constant, Some(&[2])), make(Pop, None)],
+            },
+            CompilerCase {
+                input: "func() { 5; 10; }",
+                expected_constants: vec![
+                    Integer(5),
+                    Integer(10),
+                    CompiledFn(Instructions::from_list(vec![
+                        make(Constant, Some(&[0])),
+                        make(Pop, None),
+                        make(Constant, Some(&[1])),
+                        make(Op::Return, None),
+                    ])),
+                ],
+                expected_instructions: &[make(Constant, Some(&[2])), make(Pop, None)],
+            },
+            CompilerCase {
+                input: "func() {}",
+                expected_constants: vec![CompiledFn(Instructions::from_list(vec![make(
+                    Op::Return,
+                    None,
+                )]))],
+                expected_instructions: &[make(Constant, Some(&[0])), make(Pop, None)],
+            },
+        ];
+
+        test_compiler_cases(&cases);
+    }
+
+    #[test]
+    fn compiler_scopes() {
+        let mut compiler = Compiler::new();
+
+        assert_eq!(compiler.scope_index, 0);
+        compiler.emit(Op::Mul, None);
+
+        compiler.enter_scope();
+        assert_eq!(compiler.scope_index, 1);
+
+        compiler.emit(Op::Sub, None);
+        assert_eq!(compiler.scopes[compiler.scope_index].instructions.len(), 1);
+
+        let last = &compiler.scopes[compiler.scope_index].last_instruction;
+        assert_eq!(last.opcode, Op::Sub);
+
+        compiler.leave_scope();
+        assert_eq!(compiler.scope_index, 0);
+
+        compiler.emit(Op::Add, None);
+        assert_eq!(compiler.scopes[compiler.scope_index].instructions.len(), 2);
+
+        let previous = &compiler.scopes[compiler.scope_index].previous_instruction;
+        assert_eq!(previous.opcode, Op::Mul);
+    }
+
     fn test_compiler_cases(cases: &[CompilerCase]) {
         for case in cases {
             let program = parse(case.input);
-            let mut compiler = Compiler::default();
+            let mut compiler = Compiler::new();
 
             compiler.compile(program);
 
@@ -761,6 +968,7 @@ mod tests {
             match a {
                 Integer(i) => test_integer_object(a, e),
                 String(s) => test_string_object(a, e),
+                CompiledFn(ins) => test_compiledfn_object(a, e),
                 _ => todo!(),
             }
         }
@@ -780,6 +988,25 @@ mod tests {
         if let Object::String(i) = a {
             if let Object::String(j) = e {
                 assert_eq!(i, j, "Constant pool not the same.");
+            }
+        }
+    }
+
+    fn test_compiledfn_object(a: &Object, e: &Object) {
+        assert!(matches!(e, Object::CompiledFn(..)));
+        if let Object::CompiledFn(ins_i) = a {
+            if let Object::CompiledFn(ins_j) = e {
+                dbg!(ins_i);
+                dbg!(ins_j);
+                assert_eq!(
+                    ins_i.len(),
+                    ins_j.len(),
+                    "Instruction lengths in bytes not the same."
+                );
+                assert!(
+                    ins_i.iter().eq(ins_j.iter()),
+                    "Instruction contents not the same."
+                );
             }
         }
     }

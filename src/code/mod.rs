@@ -8,12 +8,20 @@ use std::ops::{Deref, DerefMut};
  */
 /// Containerr for insturctions in bytes
 /// [0, 0, 1, 0, 0, 2, 0, 1, 0] Correspods to [Constant 1, Constant 2, Constant 256]
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct Instructions(pub Vec<u8>);
 
 impl Instructions {
     pub fn new(v: Vec<u8>) -> Self {
         Instructions(v)
+    }
+
+    pub fn from_list(vs: Vec<Self>) -> Self {
+        let mut ins = vec![];
+        for mut v in vs {
+            ins.append(&mut v);
+        }
+        Instructions(ins)
     }
 }
 
@@ -97,6 +105,9 @@ pub enum Op {
     BuildArray = 18,
     BuildHashMap = 19,
     Index = 20,
+    Call = 21,
+    Return = 22,
+    Exit = 23,
 }
 
 impl fmt::Display for Op {
@@ -136,9 +147,11 @@ impl TryFrom<u8> for Op {
             18 => Self::BuildArray,
             19 => Self::BuildHashMap,
             20 => Self::Index,
+            21 => Self::Call,
+            22 => Self::Return,
+            23 => Self::Exit,
             _ => return Err("No Opcode corresponding to byte found."),
         };
-
         Ok(code)
     }
 }
@@ -312,6 +325,27 @@ lazy_static! {
             Op::Index,
             Definition {
                 name: "OpIndex",
+                operand_widths: &[]
+            }
+        ),
+        (
+            Op::Call,
+            Definition {
+                name: "OpCall",
+                operand_widths: &[]
+            }
+        ),
+        (
+            Op::Return,
+            Definition {
+                name: "OpReturn",
+                operand_widths: &[]
+            }
+        ),
+        (
+            Op::Exit,
+            Definition {
+                name: "OpExit",
                 operand_widths: &[]
             }
         ),

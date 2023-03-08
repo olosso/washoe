@@ -1,3 +1,4 @@
+#![allow(non_camel_case_types)]
 use crate::ast::{Body, Expression, Node, Params, Statement};
 use crate::evaluator::EvalError;
 use core::cmp::PartialEq;
@@ -19,6 +20,7 @@ pub enum Type {
     RETURN,
     FUNCTION,
     BUILTIN,
+    COMPILEDFN,
 }
 
 /*
@@ -35,6 +37,7 @@ pub enum Object {
     HashMap(HashMap<Self, Self>),
     Function(Vec<Expression>, Statement, Environment),
     Builtin(&'static str, fn(Vec<Self>) -> Result<Self, EvalError>),
+    CompiledFn(crate::code::Instructions),
 }
 
 impl Default for Object {
@@ -131,6 +134,9 @@ impl PartialEq for Object {
                     false
                 }
             }
+            Object::CompiledFn(_) => {
+                todo!()
+            }
         }
     }
 }
@@ -161,6 +167,7 @@ impl Clone for Object {
                 }
                 Self::HashMap(b)
             }
+            Self::CompiledFn(_) => todo!(),
         }
     }
 }
@@ -179,6 +186,7 @@ impl Object {
             Object::Return(_) => Type::RETURN,
             Object::Function(..) => Type::FUNCTION,
             Object::Builtin(..) => Type::BUILTIN,
+            Object::CompiledFn(..) => Type::COMPILEDFN,
         }
     }
 
@@ -217,7 +225,10 @@ impl Object {
                     sv.push(format!("{}: {}", k.inspect(), v.inspect()))
                 }
                 let s = sv.join(", ");
-                format!("{{ {} }}", s)
+                format!("{{ {s} }}")
+            }
+            Object::CompiledFn(ins) => {
+                format!("{ins}")
             }
         }
     }
