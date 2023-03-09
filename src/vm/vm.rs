@@ -90,9 +90,11 @@ impl<'stack, 'globals> VM<'stack, 'globals> {
 
     fn push_frame(&mut self, frame: Frame) {
         self.frames.push(frame);
+        self.frames_index += 1;
     }
 
     fn pop_frame(&mut self) -> Frame {
+        self.frames_index -= 1;
         self.frames.pop().unwrap()
     }
 
@@ -110,7 +112,7 @@ impl<'stack, 'globals> VM<'stack, 'globals> {
     pub fn run(&mut self) {
         while self.current_frame().ip < self.current_instructions().len() {
             println!(
-                "TOPLEVEL: Current instruction pointer {}",
+                "INST.PTR.: Current instruction pointer {}",
                 self.current_frame().ip
             );
             println!("INSTRUCTIONS:\n{}", self.current_instructions());
@@ -145,6 +147,35 @@ impl<'stack, 'globals> VM<'stack, 'globals> {
 
                     // Push the Object corresponding to the index onto the stack.
                     self.push(self.constants[const_index as usize].clone());
+                }
+                Op::Call => {
+                    // NOTE In the book the CompiledFunction isn't popped off the Stack. Why not?
+                    // I guess I implemented a different "calling convention"?
+                    let func = self.pop();
+                    let frame = Frame::new(func.clone());
+                    self.push_frame(frame);
+                    /*
+                     * REVIEW Short-circuit to skip over the default increment of 1 after every instruction.
+                     * Is this necessary?
+                     */
+                    continue;
+                }
+                Op::Return | Op::Exit => {
+                    // In case the Function is has no statements in it.
+                    if let Op::Exit = op {
+                        self.push(Object::Null);
+                    };
+
+                    // Get the current Frame of the Stack.
+                    self.pop_frame();
+
+                    /*
+                     * The local variable ip inside this loop still has the ip value of the previous Frame,
+                     * when the Frame is popped.
+                     * For this reason, we need to update the value of the local variable ip back
+                     * to where the previous Frame left off. The Frame remembers its own ip.
+                     */
+                    ip = self.current_frame().ip;
                 }
                 Op::True | Op::False => {
                     if op == Op::True {

@@ -167,7 +167,7 @@ impl Clone for Object {
                 }
                 Self::HashMap(b)
             }
-            Self::CompiledFn(_) => todo!(),
+            Self::CompiledFn(ins) => Self::CompiledFn(ins.clone()),
         }
     }
 }

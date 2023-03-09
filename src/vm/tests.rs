@@ -380,5 +380,55 @@ mod vm_tests {
 
             test_vm_run(&cases);
         }
+
+        #[test]
+        fn test_function_calls_no_args() {
+            let cases = [
+                VMCase {
+                    input: "func() { return 1 + 1; }()",
+                    expected: Integer(2),
+                },
+                VMCase {
+                    input: "let foo = func() { return 1 + 1; }; foo();",
+                    expected: Integer(2),
+                },
+                VMCase {
+                    input: "let one = func() { 1; };
+let two = func() { 2; };
+one() + two()",
+                    expected: Integer(3),
+                },
+                VMCase {
+                    input: "let a = func() { 1; };
+let b = func() { a() + 1; };
+let c = func() { b() + 1; };
+c();",
+                    expected: Integer(3),
+                },
+                VMCase {
+                    input: "let ret = func() { return 99; 100; };
+ret();",
+                    expected: Integer(99),
+                },
+                VMCase {
+                    input: "let ret = func() { return 99; return 100; };
+ret();",
+                    expected: Integer(99),
+                },
+                VMCase {
+                    input: "func(){}();",
+                    expected: Null,
+                },
+                VMCase {
+                    input: "let returnsOne = func() { 1; };
+let returnsOneReturner = func() { returnsOne; };
+returnsOneReturner()();
+",
+                    expected: Integer(1),
+                },
+            ];
+
+            test_vm_run(&cases);
+        }
     }
 }
