@@ -81,7 +81,7 @@ mod vm_tests {
                 let program = parse(case.input);
 
                 // Generation
-                let mut compiler = Compiler::default();
+                let mut compiler = Compiler::new();
                 compiler.compile(program);
                 let mut globals = Globals::new();
                 let mut stack = Stack::new();

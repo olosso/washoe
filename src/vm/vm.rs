@@ -12,15 +12,50 @@ use super::globals::{Globals, GLOBALS_SIZE};
 use super::stack::{Stack, STACK_SIZE};
 
 /*
+ * @VM::FRAME
+ */
+/// Struct representing a Stack Frame (AKA Call Frame or Activation Record)
+#[derive(Debug)]
+struct Frame {
+    func: Object, // This is always a Compiled Function that is currently executing.
+    ip: usize,    // The instruction pointer in the current frame.
+}
+
+impl Frame {
+    fn new(obj: Object) -> Self {
+        assert!(matches!(obj, Object::CompiledFn(..)));
+        Self { func: obj, ip: 0 }
+    }
+
+    fn instructions(&self) -> &Instructions {
+        // Thank God that Rust allows me to do this.
+        if let Object::CompiledFn(ref instructions) = self.func {
+            instructions
+        } else {
+            // I swear this should never happen.
+            unreachable!()
+        }
+    }
+
+    #[allow(non_snake_case)]
+    pub const fn MAX_FRAMES() -> usize {
+        2usize.pow(10)
+    }
+}
+
+/*
  * @VM::VM
  */
 #[derive(Debug)]
 pub struct VM<'stack, 'globals> {
-    constants: Vec<Object>,
-    instructions: Instructions,
-    globals: &'globals mut Globals,
+    constants: Vec<Object>,         // Precompiled constants
+    globals: &'globals mut Globals, // All the global names.
+
     stack: &'stack mut Stack,
     sp: usize,
+
+    frames: Vec<Frame>,  // A Stack of Frames
+    frames_index: usize, // The index of the current Frame
 }
 
 impl<'stack, 'globals> VM<'stack, 'globals> {
@@ -29,13 +64,40 @@ impl<'stack, 'globals> VM<'stack, 'globals> {
         globals: &'globals mut Globals,
         stack: &'stack mut Stack,
     ) -> Self {
+        let main = Object::CompiledFn(bytecode.instructions);
+        let main_frame = Frame::new(main);
+        let mut frames = vec![main_frame];
+
         VM {
             constants: bytecode.constants,
-            instructions: bytecode.instructions,
+            // instructions: bytecode.instructions,
             globals,
             stack,
             sp: 0,
+
+            frames,
+            frames_index: 0,
         }
+    }
+
+    fn current_frame(&self) -> &Frame {
+        &self.frames[self.frames_index]
+    }
+
+    fn current_instructions(&self) -> &Instructions {
+        self.frames[self.frames_index].instructions()
+    }
+
+    fn push_frame(&mut self, frame: Frame) {
+        self.frames.push(frame);
+    }
+
+    fn pop_frame(&mut self) -> Frame {
+        self.frames.pop().unwrap()
+    }
+
+    fn update_ip(&mut self, ip: usize) {
+        self.frames[self.frames_index].ip = ip;
     }
 
     /*
@@ -46,25 +108,29 @@ impl<'stack, 'globals> VM<'stack, 'globals> {
      * If the stack size (in bytes) exceeds a predetermined limit, the VM will crash with a "stack overflow".
      */
     pub fn run(&mut self) {
-        let mut ip = 0;
-        while ip < self.instructions.len() {
-            println!("TOPLEVEL: Current instruction pointer {ip}");
-            println!("INSTRUCTIONS:\n{}", self.instructions);
+        while self.current_frame().ip < self.current_instructions().len() {
+            println!(
+                "TOPLEVEL: Current instruction pointer {}",
+                self.current_frame().ip
+            );
+            println!("INSTRUCTIONS:\n{}", self.current_instructions());
 
-            let op = Op::try_from(self.instructions[ip]).unwrap();
+            let mut ip = self.current_frame().ip;
+            let op = Op::try_from(self.current_instructions()[ip]).unwrap();
 
+            // The match statement that rules them all ☠
             match op {
                 Op::Pop => {
                     self.pop();
                 }
                 Op::SetGlobal => {
-                    let global_index = read_uint16(&self.instructions, ip + 1) as usize;
+                    let global_index = read_uint16(self.current_instructions(), ip + 1) as usize;
                     ip += 2;
 
                     self.globals[global_index] = self.pop().clone();
                 }
                 Op::GetGlobal => {
-                    let global_index = read_uint16(&self.instructions, ip + 1) as usize;
+                    let global_index = read_uint16(self.current_instructions(), ip + 1) as usize;
                     ip += 2;
 
                     self.push(self.globals[global_index].clone());
@@ -74,7 +140,7 @@ impl<'stack, 'globals> VM<'stack, 'globals> {
                 }
                 Op::Constant => {
                     // Read the index of the constant from the operand for Op::Constant.
-                    let const_index = read_uint16(&self.instructions, ip + 1);
+                    let const_index = read_uint16(self.current_instructions(), ip + 1);
                     ip += 2;
 
                     // Push the Object corresponding to the index onto the stack.
@@ -88,7 +154,7 @@ impl<'stack, 'globals> VM<'stack, 'globals> {
                     }
                 }
                 Op::BuildArray => {
-                    let array_size = read_uint16(&self.instructions, ip + 1) as usize;
+                    let array_size = read_uint16(self.current_instructions(), ip + 1) as usize;
                     ip += 2;
 
                     /*
@@ -107,7 +173,7 @@ impl<'stack, 'globals> VM<'stack, 'globals> {
                     self.push(arr);
                 }
                 Op::BuildHashMap => {
-                    let hashmap_size = read_uint16(&self.instructions, ip + 1) as usize;
+                    let hashmap_size = read_uint16(self.current_instructions(), ip + 1) as usize;
                     ip += 2;
 
                     let mut hm = std::collections::HashMap::new();
@@ -126,7 +192,7 @@ impl<'stack, 'globals> VM<'stack, 'globals> {
                     let index = self.pop().clone();
                     let container = self.pop().clone();
 
-                    // REFACTOR Refactor this for the love of God.
+                    // REFACTOR Refactor this for the love of God. ✝
                     let val = match container {
                         Object::Array(a) => {
                             if let Object::Integer(i) = index {
@@ -204,7 +270,7 @@ impl<'stack, 'globals> VM<'stack, 'globals> {
                 }
                 Op::Jump | Op::JumpMaybe => {
                     // Get the operand of the Jump instruction.
-                    let const_index = read_uint16(&self.instructions, ip + 1);
+                    let const_index = read_uint16(self.current_instructions(), ip + 1);
                     let next_ins = if let Some(Object::Integer(i)) =
                         self.constants.get(const_index as usize)
                     {
@@ -216,7 +282,8 @@ impl<'stack, 'globals> VM<'stack, 'globals> {
                     match op {
                         Op::Jump => {
                             ip += next_ins;
-                            // Short-circuit to skip over the default increment of 1 after every instruction.
+                            // REVIEW HACK Short-circuit to skip over the default increment of 1 after every instruction.
+                            self.update_ip(ip);
                             continue;
                         }
                         Op::JumpMaybe => {
@@ -232,7 +299,8 @@ impl<'stack, 'globals> VM<'stack, 'globals> {
                             } else {
                                 // Increment ip, if the condition evaluated to false.
                                 ip += next_ins;
-                                // Short-circuit to skip over the default increment of 1 after every instruction.
+                                // REVIEW HACK Short-circuit to skip over the default increment of 1 after every instruction.
+                                self.update_ip(ip);
                                 continue;
                             }
                         }
@@ -244,6 +312,7 @@ impl<'stack, 'globals> VM<'stack, 'globals> {
 
             // NOTE I'm here! Don't forget about me!
             ip += 1;
+            self.update_ip(ip);
         }
     }
 

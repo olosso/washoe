@@ -55,7 +55,7 @@ pub struct Compiler {
 }
 
 impl Compiler {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Compiler {
             constants: Vec::new(),
             table: SymbolTable::default(),
@@ -139,8 +139,11 @@ impl Compiler {
                 self.enter_scope();
                 self.c_statement(body);
 
+                if self.current_instructions().is_empty() {
+                    self.emit(Op::Exit, None);
+                };
                 // This block allows the last expression of a function body to omit the "return" keyword.
-                if !matches!(self.last_instruction().opcode, Op::Return) {
+                if !matches!(self.last_instruction().opcode, Op::Return | Op::Exit) {
                     /*
                      * Removing a Pop instruction, that would otherwise be there after an expression.
                      * The last expression of a Function shouldn't be Popped, since the value of
@@ -917,7 +920,7 @@ mod tests {
             CompilerCase {
                 input: "func() {}",
                 expected_constants: vec![CompiledFn(Instructions::from_list(vec![make(
-                    Op::Return,
+                    Op::Exit, // NOTE This is Exit, not Return!
                     None,
                 )]))],
                 expected_instructions: &[make(Constant, Some(&[0])), make(Pop, None)],
