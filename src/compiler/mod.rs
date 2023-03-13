@@ -1,3 +1,8 @@
+use std::borrow::Borrow;
+use std::cell::RefCell;
+use std::mem;
+use std::rc::Rc;
+
 use crate::ast::{self, Node};
 use crate::ast::{Expression, Statement};
 use crate::code::{self, Instructions, Op};
@@ -6,9 +11,8 @@ use crate::object::Object::*;
 use ast::Expression::*;
 use ast::Statement::*;
 
-use self::symbol_table::SymbolTable;
-
 mod symbol_table;
+use symbol_table::{Scope, SymbolTable};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EmittedInstruction {
@@ -49,7 +53,6 @@ impl Default for CompilationScope {
 pub struct Compiler {
     constants: Vec<Object>,
     table: symbol_table::SymbolTable,
-
     scopes: Vec<CompilationScope>,
     scope_index: usize,
 }
@@ -320,6 +323,9 @@ impl Compiler {
         let scope = CompilationScope::default();
         self.scopes.push(scope);
         self.scope_index += 1;
+
+        let child = SymbolTable::new(Some(Rc::new(RefCell::new(self.table))));
+        self.table = child;
     }
 
     /// After a function has been compiled, the created scope destroyed.
@@ -327,6 +333,9 @@ impl Compiler {
         let instructions = self.current_instructions().clone();
         self.scopes.pop();
         self.scope_index -= 1;
+
+        let parent: SymbolTable = unsafe { *self.table.parent.unwrap().as_ptr().clone() };
+        self.table = parent;
         instructions
     }
 }
@@ -978,11 +987,68 @@ mod tests {
     }
 
     #[test]
+    fn function_local_bindings_compilation() {
+        use code::make;
+        let cases = [
+            CompilerCase {
+                input: "let x = 10; func() { x; }",
+                expected_constants: vec![
+                    Integer(10),
+                    CompiledFn(Instructions::from_list(vec![
+                        make(GetGlobal, Some(&[0])),
+                        make(Op::Return, None),
+                    ])),
+                ],
+                expected_instructions: &[
+                    make(Constant, Some(&[0])),
+                    make(SetGlobal, Some(&[0])),
+                    make(Constant, Some(&[1])),
+                    make(Pop, None),
+                ],
+            },
+            CompilerCase {
+                input: "func() { let x = 10; x };",
+                expected_constants: vec![
+                    Integer(10),
+                    CompiledFn(Instructions::from_list(vec![
+                        make(Constant, Some(&[0])),
+                        make(SetLocal, Some(&[0])),
+                        make(GetLocal, Some(&[0])),
+                        make(Op::Return, None),
+                    ])),
+                ],
+                expected_instructions: &[make(Constant, Some(&[1])), make(Pop, None)],
+            },
+            CompilerCase {
+                input: "func() { let a = 1; let b = -1; a + b };",
+                expected_constants: vec![
+                    Integer(10),
+                    CompiledFn(Instructions::from_list(vec![
+                        make(Constant, Some(&[0])),
+                        make(SetLocal, Some(&[0])),
+                        make(Constant, Some(&[1])),
+                        make(SetLocal, Some(&[1])),
+                        make(GetLocal, Some(&[0])),
+                        make(GetLocal, Some(&[1])),
+                        make(Add, None),
+                        make(Op::Return, None),
+                    ])),
+                ],
+                expected_instructions: &[make(Constant, Some(&[2])), make(Pop, None)],
+            },
+        ];
+
+        test_compiler_cases(&cases);
+    }
+
+    #[test]
     fn compiler_scopes() {
         let mut compiler = Compiler::new();
 
         assert_eq!(compiler.scope_index, 0);
         compiler.emit(Op::Mul, None);
+        // Grab a pointer into the table, for comparison later.
+        let global: *const SymbolTable = &compiler.table;
 
         compiler.enter_scope();
         assert_eq!(compiler.scope_index, 1);
@@ -993,8 +1059,19 @@ mod tests {
         let last = &compiler.scopes[compiler.scope_index].last_instruction;
         assert_eq!(last.opcode, Op::Sub);
 
+        // Finding out if the current table is pointing to the global scope.
+        let p: *const SymbolTable = compiler.table.parent.as_ref().unwrap().borrow();
+        assert_eq!(
+            // HACK There must be a better way!
+            p,
+            global
+        );
+
         compiler.leave_scope();
         assert_eq!(compiler.scope_index, 0);
+
+        let p: *const SymbolTable = &compiler.table;
+        assert_eq!(p, global);
 
         compiler.emit(Op::Add, None);
         assert_eq!(compiler.scopes[compiler.scope_index].instructions.len(), 2);

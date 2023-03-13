@@ -108,6 +108,8 @@ pub enum Op {
     Call = 21,
     Return = 22,
     Exit = 23,
+    SetLocal = 24,
+    GetLocal = 25,
 }
 
 impl fmt::Display for Op {
@@ -150,6 +152,8 @@ impl TryFrom<u8> for Op {
             21 => Self::Call,
             22 => Self::Return,
             23 => Self::Exit,
+            24 => Self::SetLocal,
+            24 => Self::GetLocal,
             _ => return Err("No Opcode corresponding to byte found."),
         };
         Ok(code)
@@ -349,6 +353,20 @@ lazy_static! {
                 operand_widths: &[]
             }
         ),
+        (
+            Op::SetLocal,
+            Definition {
+                name: "OpSetLocal",
+                operand_widths: &[1]
+            }
+        ),
+        (
+            Op::GetLocal,
+            Definition {
+                name: "OpGetLocal",
+                operand_widths: &[1]
+            }
+        ),
     ]);
 }
 
@@ -378,6 +396,12 @@ pub fn make(op: Op, operands: Option<&[u32]>) -> Instructions {
     for (o, w) in operands.iter().zip(def.operand_widths) {
         match w {
             0 => unreachable!(),
+            1 => {
+                let bytes = o.to_be_bytes();
+                // Getting the last bytes of a 4 byte thing. It's a bit nasty but it works.
+                let bytes = [bytes[bytes.len() - 1]];
+                instruction.append(&mut Vec::from(bytes));
+            }
             2 => {
                 let bytes = o.to_be_bytes();
                 // Getting the two last bytes of a 4 byte thing.
@@ -403,6 +427,9 @@ pub fn read_operands(def: &Definition, ins: &[u8]) -> (Vec<u16>, usize) {
 
     for ow in def.operand_widths {
         match ow {
+            1 => {
+                operands.push(read_uint8(ins, offset));
+            }
             2 => {
                 operands.push(read_uint16(ins, offset));
             }
@@ -413,6 +440,12 @@ pub fn read_operands(def: &Definition, ins: &[u8]) -> (Vec<u16>, usize) {
     }
 
     (operands, offset)
+}
+
+// REVIEW This might be useless.
+pub fn read_uint8(ins: &[u8], offset: usize) -> u16 {
+    let bytes = [0, ins[offset]];
+    u16::from_be_bytes(bytes)
 }
 
 pub fn read_uint16(ins: &[u8], offset: usize) -> u16 {
@@ -442,6 +475,11 @@ mod tests {
                 op: Op::Add,
                 operands: None,
                 expected: &[Op::Add as u8],
+            },
+            Case {
+                op: Op::SetLocal,
+                operands: Some(&[100]),
+                expected: &[Op::SetLocal as u8, 100],
             },
         ];
 
@@ -491,11 +529,18 @@ mod tests {
             bytes_read: usize,
         }
 
-        let cases = [Case {
-            op: Constant,
-            operands: Some(&[65535]),
-            bytes_read: 2,
-        }];
+        let cases = [
+            Case {
+                op: Constant,
+                operands: Some(&[65535]),
+                bytes_read: 2,
+            },
+            Case {
+                op: SetLocal,
+                operands: Some(&[100]),
+                bytes_read: 1,
+            },
+        ];
 
         for case in cases {
             let instruction = make(case.op, case.operands);

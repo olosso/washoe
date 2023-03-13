@@ -6,6 +6,17 @@ mod evaluator_tests {
     use crate::object::*;
     use crate::parser::*;
 
+    use std::pin::Pin;
+
+    struct Foo {}
+
+    #[test]
+    fn pin() {
+        let foo = Foo {};
+        let pin = Pin::new(&foo);
+        let foofoo = foo;
+    }
+
     fn init(source_code: &str) -> Program {
         let lexer = Lexer::new(source_code.to_string());
         let mut parser = Parser::new(lexer);
