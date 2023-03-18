@@ -188,7 +188,7 @@ impl Parser {
 
         if !self.expect_peek(TokenType::Ident) {
             return Err(PE::new(
-                "Let statement not followed by an identifier.".to_string(),
+                "Let statement not followed by an identifier".to_string(),
             ));
         };
         // current_token is Ident

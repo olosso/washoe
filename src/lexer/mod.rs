@@ -96,7 +96,7 @@ impl Lexer {
             'a'..='z' | 'A'..='Z' | '_' => {
                 let mut identifier = String::from("");
 
-                while self.ch.is_alphabetic() || self.ch == '_' {
+                while self.ch.is_alphanumeric() || self.ch == '_' {
                     identifier.push(self.ch);
                     self.read_char();
                 }

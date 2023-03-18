@@ -36,8 +36,13 @@ impl Stack {
 impl fmt::Display for Stack {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut s = String::new();
-        for o in self.0.iter().take_while(|x| x != &&Object::Null) {
-            s = s + &o.inspect() + "\n";
+        for (i, o) in self
+            .0
+            .iter()
+            .take_while(|x| x != &&Object::Null)
+            .enumerate()
+        {
+            s = s + format!("{i:0>3}").as_str() + " " + &o.inspect() + "\n";
         }
         write!(f, "{s}")
     }

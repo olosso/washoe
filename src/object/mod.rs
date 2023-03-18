@@ -37,7 +37,7 @@ pub enum Object {
     HashMap(HashMap<Self, Self>),
     Function(Vec<Expression>, Statement, Environment),
     Builtin(&'static str, fn(Vec<Self>) -> Result<Self, EvalError>),
-    CompiledFn(crate::code::Instructions),
+    CompiledFn(crate::code::Instructions, usize),
 }
 
 impl Default for Object {
@@ -134,8 +134,12 @@ impl PartialEq for Object {
                     false
                 }
             }
-            Object::CompiledFn(_) => {
-                todo!()
+            Object::CompiledFn(ins_a, count_a) => {
+                if let Object::CompiledFn(ins_b, count_b) = other {
+                    ins_a == ins_b && count_a == count_b
+                } else {
+                    false
+                }
             }
         }
     }
@@ -167,7 +171,7 @@ impl Clone for Object {
                 }
                 Self::HashMap(b)
             }
-            Self::CompiledFn(ins) => Self::CompiledFn(ins.clone()),
+            Self::CompiledFn(ins, count) => Self::CompiledFn(ins.clone(), *count),
         }
     }
 }
@@ -227,7 +231,7 @@ impl Object {
                 let s = sv.join(", ");
                 format!("{{ {s} }}")
             }
-            Object::CompiledFn(ins) => {
+            Object::CompiledFn(ins, count) => {
                 format!("{ins}")
             }
         }

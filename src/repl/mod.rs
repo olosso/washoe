@@ -30,11 +30,13 @@ impl REPL {
 
             match parser.parse_program() {
                 Ok(program) => {
-                    let mut compiler = Compiler::default();
+                    let mut compiler = Compiler::new();
                     compiler.compile(program);
-                    let mut globals = globals::Globals::new();
+                    let mut globals = globals::Objects::new();
+                    let mut locals = globals::Objects::new();
                     let mut stack = stack::Stack::new();
-                    let mut vm = vm::VM::new(compiler.bytecode(), &mut globals, &mut stack);
+                    let mut vm =
+                        vm::VM::new(compiler.bytecode(), &mut globals, &mut locals, &mut stack);
                     vm.run();
                     let top = vm.last_popped_obj();
                     println!("{top:?}");

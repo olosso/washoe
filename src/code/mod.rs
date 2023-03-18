@@ -153,7 +153,7 @@ impl TryFrom<u8> for Op {
             22 => Self::Return,
             23 => Self::Exit,
             24 => Self::SetLocal,
-            24 => Self::GetLocal,
+            25 => Self::GetLocal,
             _ => return Err("No Opcode corresponding to byte found."),
         };
         Ok(code)
@@ -336,7 +336,7 @@ lazy_static! {
             Op::Call,
             Definition {
                 name: "OpCall",
-                operand_widths: &[]
+                operand_widths: &[1]
             }
         ),
         (

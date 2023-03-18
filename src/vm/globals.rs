@@ -11,9 +11,9 @@ use std::{
 // REVIEW This was originally 2**16, but that resulted in a Rust throwing a stack overflow!
 pub const GLOBALS_SIZE: usize = 2usize.pow(8);
 #[derive(Debug)]
-pub struct Globals([Object; GLOBALS_SIZE]);
+pub struct Objects([Object; GLOBALS_SIZE]);
 
-impl Globals {
+impl Objects {
     pub fn new() -> Self {
         let nulls = {
             let mut data: [MaybeUninit<Object>; GLOBALS_SIZE] =
@@ -30,11 +30,11 @@ impl Globals {
             unsafe { mem::transmute::<_, [Object; GLOBALS_SIZE]>(data) }
         };
 
-        Globals(nulls)
+        Objects(nulls)
     }
 }
 
-impl fmt::Display for Globals {
+impl fmt::Display for Objects {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut s = String::new();
         for o in self.0.iter().take_while(|x| x != &&Object::Null) {
@@ -44,13 +44,13 @@ impl fmt::Display for Globals {
     }
 }
 
-impl Deref for Globals {
+impl Deref for Objects {
     type Target = [Object];
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
-impl DerefMut for Globals {
+impl DerefMut for Objects {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }

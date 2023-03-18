@@ -3,12 +3,12 @@ use std::mem::{self, MaybeUninit};
 use std::ops::{Deref, DerefMut};
 
 use crate::{
-    code::{read_uint16, Instructions, Op},
+    code::{read_uint16, read_uint8, Instructions, Op},
     compiler::Bytecode,
     object::Object,
 };
 
-use super::globals::{Globals, GLOBALS_SIZE};
+use super::globals::{Objects, GLOBALS_SIZE};
 use super::stack::{Stack, STACK_SIZE};
 
 /*
@@ -19,17 +19,22 @@ use super::stack::{Stack, STACK_SIZE};
 struct Frame {
     func: Object, // This is always a Compiled Function that is currently executing.
     ip: usize,    // The instruction pointer in the current frame.
+    bp: usize,    // Base pointer for of current Frame
 }
 
 impl Frame {
-    fn new(obj: Object) -> Self {
+    fn new(obj: Object, bp: usize) -> Self {
         assert!(matches!(obj, Object::CompiledFn(..)));
-        Self { func: obj, ip: 0 }
+        Self {
+            func: obj,
+            ip: 0,
+            bp,
+        }
     }
 
     fn instructions(&self) -> &Instructions {
         // Thank God that Rust allows me to do this.
-        if let Object::CompiledFn(ref instructions) = self.func {
+        if let Object::CompiledFn(ref instructions, _) = self.func {
             instructions
         } else {
             // I swear this should never happen.
@@ -39,7 +44,7 @@ impl Frame {
 
     #[allow(non_snake_case)]
     pub const fn MAX_FRAMES() -> usize {
-        2usize.pow(10)
+        2usize.pow(8)
     }
 }
 
@@ -47,36 +52,40 @@ impl Frame {
  * @VM::VM
  */
 #[derive(Debug)]
-pub struct VM<'stack, 'globals> {
+pub struct VM<'stack, 'objects> {
     constants: Vec<Object>,         // Precompiled constants
-    globals: &'globals mut Globals, // All the global names.
+    globals: &'objects mut Objects, // All the global values.
+    locals: &'objects mut Objects,  // All the local values.
 
     stack: &'stack mut Stack,
     sp: usize,
 
     frames: Vec<Frame>,  // A Stack of Frames
     frames_index: usize, // The index of the current Frame
+    current_func: usize,
 }
 
-impl<'stack, 'globals> VM<'stack, 'globals> {
+impl<'stack, 'objects> VM<'stack, 'objects> {
     pub fn new(
         bytecode: Bytecode,
-        globals: &'globals mut Globals,
+        globals: &'objects mut Objects,
+        locals: &'objects mut Objects,
         stack: &'stack mut Stack,
     ) -> Self {
-        let main = Object::CompiledFn(bytecode.instructions);
-        let main_frame = Frame::new(main);
+        let main = Object::CompiledFn(bytecode.instructions, 0);
+        let main_frame = Frame::new(main, 0);
         let mut frames = vec![main_frame];
 
         VM {
             constants: bytecode.constants,
-            // instructions: bytecode.instructions,
             globals,
+            locals,
             stack,
             sp: 0,
 
             frames,
             frames_index: 0,
+            current_func: 0,
         }
     }
 
@@ -111,12 +120,16 @@ impl<'stack, 'globals> VM<'stack, 'globals> {
      */
     pub fn run(&mut self) {
         while self.current_frame().ip < self.current_instructions().len() {
-            println!(
-                "INST.PTR.: Current instruction pointer {}",
-                self.current_frame().ip
-            );
-            println!("INSTRUCTIONS:\n{}", self.current_instructions());
+            // println!(
+            //     "INST.PTR.: Current instruction pointer {}",
+            //     self.current_frame().ip
+            // );
+            // println!("INSTRUCTIONS:\n{}", self.current_instructions());
+            // println!("STACK.PTR.: Current stack pointer {}", self.sp);
+            // println!("STACK:\n{}", self.stack);
 
+            // NOTE The instruction is relative to the current frame.
+            // So each function starts with the ip set to 0.
             let mut ip = self.current_frame().ip;
             let op = Op::try_from(self.current_instructions()[ip]).unwrap();
 
@@ -125,6 +138,38 @@ impl<'stack, 'globals> VM<'stack, 'globals> {
                 Op::Pop => {
                     self.pop();
                 }
+                Op::SetLocal => {
+                    let local_index = read_uint8(self.current_instructions(), ip + 1) as usize;
+                    ip += 1;
+
+                    /*
+                     * bp = Where the current FunctionObject is on the stack.
+                     * bp + 1 = Where the local variables start
+                     * local_index = a unique index for each local variable
+                     */
+                    let stack_location = self.current_frame().bp + 1 + local_index;
+
+                    // Update the local variables directly on the stack.
+                    self.stack[stack_location] = self.pop().clone();
+                }
+                Op::GetLocal => {
+                    // What index has the the compiler given to the object?
+                    let local_index = read_uint8(self.current_instructions(), ip + 1) as usize;
+                    ip += 1;
+
+                    /*
+                     * bp = Where the current FunctionObject is on the stack.
+                     * bp + 1 = Where the local variables are located
+                     * local_index = a unique index for each local variable
+                     */
+                    let stack_location = self.current_frame().bp + 1 + local_index;
+
+                    // The Object requested.
+                    let object = self.stack[stack_location].clone();
+
+                    // Push the object to the working area of the Stack.
+                    self.push(object);
+                }
                 Op::SetGlobal => {
                     let global_index = read_uint16(self.current_instructions(), ip + 1) as usize;
                     ip += 2;
@@ -132,10 +177,17 @@ impl<'stack, 'globals> VM<'stack, 'globals> {
                     self.globals[global_index] = self.pop().clone();
                 }
                 Op::GetGlobal => {
+                    // What index has the the compiler given to the object?
                     let global_index = read_uint16(self.current_instructions(), ip + 1) as usize;
                     ip += 2;
 
-                    self.push(self.globals[global_index].clone());
+                    // On the stack it goes.
+                    let object = self.globals[global_index].clone();
+                    // In case the object is a function, keep track of it.
+                    if (matches!(object, Object::CompiledFn(..))) {
+                        self.current_func = global_index;
+                    };
+                    self.push(object);
                 }
                 Op::Null => {
                     self.push(Object::Null);
@@ -148,25 +200,65 @@ impl<'stack, 'globals> VM<'stack, 'globals> {
                     // Push the Object corresponding to the index onto the stack.
                     self.push(self.constants[const_index as usize].clone());
                 }
+                /*
+                 * Call will pop the Stack, assuming that the object there is a CompiledFunction.
+                 * Then a new frame will be pushed on to the FrameStack, and instructions of that frame will be executed.
+                 * The function should have a Return statement in it somewhere, in which case the frame will
+                 * be popped of the FrameStack.
+                 */
                 Op::Call => {
-                    // NOTE In the book the CompiledFunction isn't popped off the Stack. Why not?
-                    // I guess I implemented a different "calling convention"?
-                    let func = self.pop();
-                    let frame = Frame::new(func.clone());
+                    // How many parameters does this function have?
+                    let num_params = read_uint8(self.current_instructions(), ip + 1);
+
+                    // Calculate the position of the FunctionObject on the stack.
+                    let bp = self.sp - num_params as usize - 1;
+
+                    // Get the FunctionObject
+                    let func = self.stack[bp].clone();
+
+                    // Get the number of local variables.
+                    let local_count = match func {
+                        Object::CompiledFn(_, count) => count,
+                        _ => unreachable!(),
+                    };
+
+                    // Create a new Frame, which also stores the base pointer.
+                    // The base pointer allows easy clean up of the stack when the function returns.
+                    let frame = Frame::new(func.clone(), bp);
+
+                    // Jump over the stack area of the locals.
+                    // The area after the locals is used as the working area of the function.
+                    self.sp = bp + local_count + num_params as usize + 1;
+
+                    // Create a new Frame, which among other things, has its own instruction pointer.
                     self.push_frame(frame);
+
                     /*
                      * REVIEW Short-circuit to skip over the default increment of 1 after every instruction.
                      * Is this necessary?
                      */
                     continue;
                 }
+                /*
+                 * Here the Frame is popped of the FrameStack.
+                 */
                 Op::Return | Op::Exit => {
-                    // In case the Function is has no statements in it.
-                    if let Op::Exit = op {
-                        self.push(Object::Null);
+                    // Get the Return value. The return value is Null for empty functions.
+                    // For non-empty functions, it is the value of a ReturnStatement, or
+                    // the last expression of the function.
+                    let return_value = if let Op::Exit = op {
+                        Object::Null
+                    } else {
+                        self.pop().clone()
                     };
 
-                    // Get the current Frame of the Stack.
+                    // Adjust the stack pointer back to where it was when the function was called.
+                    self.sp = self.current_frame().bp;
+
+                    // Set the return value in the position of the original FunctionObject.
+                    self.push(return_value);
+
+                    // Get the current Frame off the Stack.
                     self.pop_frame();
 
                     /*
@@ -174,8 +266,9 @@ impl<'stack, 'globals> VM<'stack, 'globals> {
                      * when the Frame is popped.
                      * For this reason, we need to update the value of the local variable ip back
                      * to where the previous Frame left off. The Frame remembers its own ip.
+                     * The +1 is there to jump over the operand of the OpCall.
                      */
-                    ip = self.current_frame().ip;
+                    ip = self.current_frame().ip + 1;
                 }
                 Op::True | Op::False => {
                     if op == Op::True {
@@ -271,6 +364,11 @@ impl<'stack, 'globals> VM<'stack, 'globals> {
                     self.push(result);
                 }
                 Op::Add | Op::Sub | Op::Mul | Op::Div => {
+                    dbg!(&self.constants);
+                    dbg!(&self.current_instructions().to_string());
+                    dbg!(&self.sp);
+                    dbg!(&self.stack[..5]);
+
                     let right = self.pop().clone();
                     let left = self.pop().clone();
 

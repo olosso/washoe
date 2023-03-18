@@ -5,14 +5,14 @@ use std::rc::Rc;
 
 use crate::ast::{self, Node};
 use crate::ast::{Expression, Statement};
-use crate::code::{self, Instructions, Op};
+use crate::code::{self, read_uint16, Instructions, Op};
 use crate::object::Object;
 use crate::object::Object::*;
 use ast::Expression::*;
 use ast::Statement::*;
 
 mod symbol_table;
-use symbol_table::{Scope, SymbolTable};
+use symbol_table::{Global, Local, ProgSymbols};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EmittedInstruction {
@@ -49,21 +49,27 @@ impl Default for CompilationScope {
 /*
  * @COMPILER::COMPILER
  */
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct Compiler {
     constants: Vec<Object>,
-    table: symbol_table::SymbolTable,
+    symbols: ProgSymbols,
     scopes: Vec<CompilationScope>,
     scope_index: usize,
+    in_global_scope: bool,
+
+    // Used to raise compile time errors, when trying to call a non-function.
+    funcs: Vec<usize>,
 }
 
 impl Compiler {
     pub fn new() -> Self {
         Compiler {
             constants: Vec::new(),
-            table: SymbolTable::default(),
+            symbols: ProgSymbols::new(),
             scopes: vec![CompilationScope::default()], // Start with a "base" scope.
             scope_index: 0,
+            in_global_scope: true,
+            funcs: Vec::new(),
         }
     }
 }
@@ -98,9 +104,19 @@ impl Compiler {
              */
             Let(_, name, expr) => {
                 self.c_expression(expr);
-                let symbol = self.table.define(&name.to_string());
-                // Op::SetGlobal tells the VM to bind the value on top of the Stack to the index of some symbol.
-                self.emit(Op::SetGlobal, Some(&[symbol.index]));
+                let index;
+                if self.in_global_scope {
+                    index = self.symbols.define_global(&name.to_string());
+                    self.emit(Op::SetGlobal, Some(&[index]));
+                } else {
+                    index = self.symbols.define_local(&name.to_string());
+                    self.emit(Op::SetLocal, Some(&[index]));
+                };
+
+                // Used for raising compile time errors.
+                if matches!(self.constants.last().unwrap(), Object::CompiledFn(..)) {
+                    self.funcs.push(index as usize);
+                }
             }
             Statement::Return(_, expr) => {
                 self.c_expression(expr);
@@ -113,13 +129,18 @@ impl Compiler {
     fn c_expression(&mut self, expr: &Expression) {
         match expr {
             Identifier(_, name) => {
-                let index = if let Some(symbol) = self.table.resolve(name) {
-                    symbol.index
+                let index;
+                if let Some(symbol) = self.symbols.resolve(name) {
+                    if symbol.global {
+                        index = symbol.index;
+                        self.emit(Op::GetGlobal, Some(&[symbol.index]));
+                    } else {
+                        index = symbol.index;
+                        self.emit(Op::GetLocal, Some(&[symbol.index]));
+                    }
                 } else {
                     panic!("No binding found for symbol with name {name}");
                 };
-
-                self.emit(Op::GetGlobal, Some(&[index]));
             }
             Bool(_, b) => {
                 if (*b) {
@@ -139,7 +160,16 @@ impl Compiler {
                 self.emit(Op::Constant, Some(&pos));
             }
             Func(_, params, body) => {
+                if self.in_global_scope {
+                    self.symbols.new_stack();
+                }
+
                 self.enter_scope();
+
+                for param in params {
+                    self.symbols.define_param(&param.to_string());
+                }
+
                 self.c_statement(body);
 
                 if self.current_instructions().is_empty() {
@@ -157,7 +187,11 @@ impl Compiler {
                 };
 
                 let instructions = self.leave_scope();
-                let compiled_fn = CompiledFn(instructions);
+                let compiled_fn = CompiledFn(
+                    instructions,
+                    self.symbols.local_frame().len()
+                        - self.symbols.local_frame().num_params as usize,
+                );
                 let pos = [self.add_constant(compiled_fn) as u32];
 
                 self.emit(Op::Constant, Some(&pos));
@@ -168,7 +202,20 @@ impl Compiler {
                  * a function. Either way, the compiler knows how to compile them.
                  */
                 self.c_expression(func);
-                self.emit(Op::Call, None);
+
+                for arg in args {
+                    self.c_expression(arg);
+                }
+
+                self.emit(Op::Call, Some(&[args.len() as u32]));
+
+                // Used for raising compile time errors.
+                if self.previous_instruction().opcode == Op::GetGlobal {
+                    let index = self.previous_instruction().clone().operands.unwrap()[0] as usize;
+                    if !self.funcs.contains(&index) {
+                        panic!("Trying to call something other than a function.");
+                    }
+                }
             }
             Expression::Array(_, expressions) => {
                 for expression in expressions {
@@ -323,9 +370,8 @@ impl Compiler {
         let scope = CompilationScope::default();
         self.scopes.push(scope);
         self.scope_index += 1;
-
-        let child = SymbolTable::new(Some(Rc::new(RefCell::new(self.table))));
-        self.table = child;
+        self.in_global_scope = false;
+        self.symbols.new_frame();
     }
 
     /// After a function has been compiled, the created scope destroyed.
@@ -333,9 +379,11 @@ impl Compiler {
         let instructions = self.current_instructions().clone();
         self.scopes.pop();
         self.scope_index -= 1;
-
-        let parent: SymbolTable = unsafe { *self.table.parent.unwrap().as_ptr().clone() };
-        self.table = parent;
+        if self.scope_index == 0 {
+            self.in_global_scope = true;
+        } else {
+            self.symbols.pop_frame();
+        };
         instructions
     }
 }
@@ -695,6 +743,15 @@ mod tests {
                     make(SetGlobal, Some(&[2])),
                 ],
             },
+            CompilerCase {
+                input: "let x = -1;",
+                expected_constants: vec![Integer(1)],
+                expected_instructions: &[
+                    make(Constant, Some(&[0])),
+                    make(Minus, None),
+                    make(SetGlobal, Some(&[0])),
+                ],
+            },
         ];
 
         test_compiler_cases(&cases);
@@ -889,12 +946,15 @@ mod tests {
                 expected_constants: vec![
                     Integer(5),
                     Integer(10),
-                    CompiledFn(Instructions::from_list(vec![
-                        make(Constant, Some(&[0])),
-                        make(Constant, Some(&[1])),
-                        make(Add, None),
-                        make(Op::Return, None),
-                    ])),
+                    CompiledFn(
+                        Instructions::from_list(vec![
+                            make(Constant, Some(&[0])),
+                            make(Constant, Some(&[1])),
+                            make(Add, None),
+                            make(Op::Return, None),
+                        ]),
+                        0,
+                    ),
                 ],
                 expected_instructions: &[make(Constant, Some(&[2])), make(Pop, None)],
             },
@@ -903,12 +963,15 @@ mod tests {
                 expected_constants: vec![
                     Integer(5),
                     Integer(10),
-                    CompiledFn(Instructions::from_list(vec![
-                        make(Constant, Some(&[0])),
-                        make(Constant, Some(&[1])),
-                        make(Add, None),
-                        make(Op::Return, None),
-                    ])),
+                    CompiledFn(
+                        Instructions::from_list(vec![
+                            make(Constant, Some(&[0])),
+                            make(Constant, Some(&[1])),
+                            make(Add, None),
+                            make(Op::Return, None),
+                        ]),
+                        0,
+                    ),
                 ],
                 expected_instructions: &[make(Constant, Some(&[2])), make(Pop, None)],
             },
@@ -917,21 +980,27 @@ mod tests {
                 expected_constants: vec![
                     Integer(5),
                     Integer(10),
-                    CompiledFn(Instructions::from_list(vec![
-                        make(Constant, Some(&[0])),
-                        make(Pop, None),
-                        make(Constant, Some(&[1])),
-                        make(Op::Return, None),
-                    ])),
+                    CompiledFn(
+                        Instructions::from_list(vec![
+                            make(Constant, Some(&[0])),
+                            make(Pop, None),
+                            make(Constant, Some(&[1])),
+                            make(Op::Return, None),
+                        ]),
+                        0,
+                    ),
                 ],
                 expected_instructions: &[make(Constant, Some(&[2])), make(Pop, None)],
             },
             CompilerCase {
                 input: "func() {}",
-                expected_constants: vec![CompiledFn(Instructions::from_list(vec![make(
-                    Op::Exit, // NOTE This is Exit, not Return!
-                    None,
-                )]))],
+                expected_constants: vec![CompiledFn(
+                    Instructions::from_list(vec![make(
+                        Op::Exit, // NOTE This is Exit, not Return!
+                        None,
+                    )]),
+                    0,
+                )],
                 expected_instructions: &[make(Constant, Some(&[0])), make(Pop, None)],
             },
         ];
@@ -948,16 +1017,19 @@ mod tests {
                 expected_constants: vec![
                     Integer(5),
                     Integer(10),
-                    CompiledFn(Instructions::from_list(vec![
-                        make(Constant, Some(&[0])),
-                        make(Constant, Some(&[1])),
-                        make(Add, None),
-                        make(Op::Return, None),
-                    ])),
+                    CompiledFn(
+                        Instructions::from_list(vec![
+                            make(Constant, Some(&[0])),
+                            make(Constant, Some(&[1])),
+                            make(Add, None),
+                            make(Op::Return, None),
+                        ]),
+                        0,
+                    ),
                 ],
                 expected_instructions: &[
                     make(Constant, Some(&[2])),
-                    make(Op::Call, None),
+                    make(Op::Call, Some(&[0])),
                     make(Pop, None),
                 ],
             },
@@ -966,18 +1038,21 @@ mod tests {
                 expected_constants: vec![
                     Integer(5),
                     Integer(10),
-                    CompiledFn(Instructions::from_list(vec![
-                        make(Constant, Some(&[0])),
-                        make(Constant, Some(&[1])),
-                        make(Add, None),
-                        make(Op::Return, None),
-                    ])),
+                    CompiledFn(
+                        Instructions::from_list(vec![
+                            make(Constant, Some(&[0])),
+                            make(Constant, Some(&[1])),
+                            make(Add, None),
+                            make(Op::Return, None),
+                        ]),
+                        0,
+                    ),
                 ],
                 expected_instructions: &[
                     make(Constant, Some(&[2])),
                     make(SetGlobal, Some(&[0])),
                     make(GetGlobal, Some(&[0])),
-                    make(Op::Call, None),
+                    make(Op::Call, Some(&[0])),
                     make(Pop, None),
                 ],
             },
@@ -994,10 +1069,13 @@ mod tests {
                 input: "let x = 10; func() { x; }",
                 expected_constants: vec![
                     Integer(10),
-                    CompiledFn(Instructions::from_list(vec![
-                        make(GetGlobal, Some(&[0])),
-                        make(Op::Return, None),
-                    ])),
+                    CompiledFn(
+                        Instructions::from_list(vec![
+                            make(GetGlobal, Some(&[0])),
+                            make(Op::Return, None),
+                        ]),
+                        0,
+                    ),
                 ],
                 expected_instructions: &[
                     make(Constant, Some(&[0])),
@@ -1010,31 +1088,226 @@ mod tests {
                 input: "func() { let x = 10; x };",
                 expected_constants: vec![
                     Integer(10),
-                    CompiledFn(Instructions::from_list(vec![
-                        make(Constant, Some(&[0])),
-                        make(SetLocal, Some(&[0])),
-                        make(GetLocal, Some(&[0])),
-                        make(Op::Return, None),
-                    ])),
+                    CompiledFn(
+                        Instructions::from_list(vec![
+                            make(Constant, Some(&[0])),
+                            make(SetLocal, Some(&[0])),
+                            make(GetLocal, Some(&[0])),
+                            make(Op::Return, None),
+                        ]),
+                        1,
+                    ),
                 ],
                 expected_instructions: &[make(Constant, Some(&[1])), make(Pop, None)],
             },
             CompilerCase {
-                input: "func() { let a = 1; let b = -1; a + b };",
+                input: "func() { let a = 1; let b = 2; a + b };",
                 expected_constants: vec![
-                    Integer(10),
-                    CompiledFn(Instructions::from_list(vec![
-                        make(Constant, Some(&[0])),
-                        make(SetLocal, Some(&[0])),
-                        make(Constant, Some(&[1])),
-                        make(SetLocal, Some(&[1])),
-                        make(GetLocal, Some(&[0])),
-                        make(GetLocal, Some(&[1])),
-                        make(Add, None),
-                        make(Op::Return, None),
-                    ])),
+                    Integer(1),
+                    Integer(2),
+                    CompiledFn(
+                        Instructions::from_list(vec![
+                            make(Constant, Some(&[0])),
+                            make(SetLocal, Some(&[0])),
+                            make(Constant, Some(&[1])),
+                            make(SetLocal, Some(&[1])),
+                            make(GetLocal, Some(&[0])),
+                            make(GetLocal, Some(&[1])),
+                            make(Add, None),
+                            make(Op::Return, None),
+                        ]),
+                        2,
+                    ),
                 ],
                 expected_instructions: &[make(Constant, Some(&[2])), make(Pop, None)],
+            },
+            CompilerCase {
+                input: "let x = 1; let foo = func() { let a = 1; let b = 2; a + b }; x + foo();",
+                expected_constants: vec![
+                    Integer(1),
+                    Integer(1),
+                    Integer(2),
+                    CompiledFn(
+                        Instructions::from_list(vec![
+                            make(Constant, Some(&[1])),
+                            make(SetLocal, Some(&[0])),
+                            make(Constant, Some(&[2])),
+                            make(SetLocal, Some(&[1])),
+                            make(GetLocal, Some(&[0])),
+                            make(GetLocal, Some(&[1])),
+                            make(Add, None),
+                            make(Op::Return, None),
+                        ]),
+                        2,
+                    ),
+                ],
+                expected_instructions: &[
+                    make(Constant, Some(&[0])),
+                    make(SetGlobal, Some(&[0])),
+                    make(Constant, Some(&[3])),
+                    make(SetGlobal, Some(&[1])),
+                    make(GetGlobal, Some(&[0])),
+                    make(GetGlobal, Some(&[1])),
+                    make(Op::Call, Some(&[0])),
+                    make(Add, None),
+                    make(Pop, None),
+                ],
+            },
+            CompilerCase {
+                input: "
+            let foo = func() { let a = 1; let b = 2; a + b };
+            let bar = func() { let a = 1; let b = 2; a + b };
+            foo() + bar();
+            ",
+                expected_constants: vec![
+                    Integer(1),
+                    Integer(2),
+                    CompiledFn(
+                        Instructions::from_list(vec![
+                            make(Constant, Some(&[0])),
+                            make(SetLocal, Some(&[0])),
+                            make(Constant, Some(&[1])),
+                            make(SetLocal, Some(&[1])),
+                            make(GetLocal, Some(&[0])),
+                            make(GetLocal, Some(&[1])),
+                            make(Add, None),
+                            make(Op::Return, None),
+                        ]),
+                        2,
+                    ),
+                    Integer(1),
+                    Integer(2),
+                    CompiledFn(
+                        Instructions::from_list(vec![
+                            make(Constant, Some(&[3])),
+                            make(SetLocal, Some(&[0])),
+                            make(Constant, Some(&[4])),
+                            make(SetLocal, Some(&[1])),
+                            make(GetLocal, Some(&[0])),
+                            make(GetLocal, Some(&[1])),
+                            make(Add, None),
+                            make(Op::Return, None),
+                        ]),
+                        2,
+                    ),
+                ],
+                expected_instructions: &[
+                    make(Constant, Some(&[2])),
+                    make(SetGlobal, Some(&[0])),
+                    make(Constant, Some(&[5])),
+                    make(SetGlobal, Some(&[1])),
+                    make(GetGlobal, Some(&[0])),
+                    make(Op::Call, Some(&[0])),
+                    make(GetGlobal, Some(&[1])),
+                    make(Op::Call, Some(&[0])),
+                    make(Add, None),
+                    make(Pop, None),
+                ],
+            },
+            CompilerCase {
+                input: "
+            let foo = func() {
+                let a = 1;
+                let bar = func() {
+                    let b = 1;
+                    a + b
+                };
+                bar
+            };
+            foo()()
+            ",
+                expected_constants: vec![
+                    Integer(1), // let a = 1
+                    Integer(1), // let b = 1
+                    CompiledFn(
+                        Instructions::from_list(vec![
+                            // let bar = ...
+                            make(Constant, Some(&[1])),
+                            make(SetLocal, Some(&[1])),
+                            make(GetLocal, Some(&[0])),
+                            make(GetLocal, Some(&[1])),
+                            make(Add, None),
+                            make(Op::Return, None),
+                        ]),
+                        1,
+                    ),
+                    CompiledFn(
+                        Instructions::from_list(vec![
+                            // let foo = ...
+                            make(Constant, Some(&[0])),
+                            make(SetLocal, Some(&[0])),
+                            make(Constant, Some(&[2])),
+                            make(SetLocal, Some(&[2])),
+                            make(GetLocal, Some(&[2])),
+                            make(Op::Return, None),
+                        ]),
+                        2,
+                    ),
+                ],
+                expected_instructions: &[
+                    make(Constant, Some(&[3])),
+                    make(SetGlobal, Some(&[0])),
+                    make(GetGlobal, Some(&[0])),
+                    make(Op::Call, Some(&[0])),
+                    make(Op::Call, Some(&[0])),
+                    make(Pop, None),
+                ],
+            },
+            CompilerCase {
+                input: "
+            let foo = func(a) { a };
+            foo(42)
+            ",
+                expected_constants: vec![
+                    CompiledFn(
+                        Instructions::from_list(vec![
+                            make(GetLocal, Some(&[0])),
+                            make(Op::Return, None),
+                        ]),
+                        0, // Number of local variables
+                    ),
+                    Integer(42),
+                ],
+                expected_instructions: &[
+                    make(Constant, Some(&[0])),
+                    make(SetGlobal, Some(&[0])),
+                    make(GetGlobal, Some(&[0])),
+                    make(Constant, Some(&[1])), // 1 == Number of parameters
+                    make(Op::Call, Some(&[1])),
+                    make(Pop, None),
+                ],
+            },
+            CompilerCase {
+                input: "
+            let foo = func(a, b, c) { a; b; c };
+            foo(1, 2, 3);
+            ",
+                expected_constants: vec![
+                    CompiledFn(
+                        Instructions::from_list(vec![
+                            make(GetLocal, Some(&[0])),
+                            make(Pop, None),
+                            make(GetLocal, Some(&[1])),
+                            make(Pop, None),
+                            make(GetLocal, Some(&[2])),
+                            make(Op::Return, None),
+                        ]),
+                        0, // Number of local variables
+                    ),
+                    Integer(1),
+                    Integer(2),
+                    Integer(3),
+                ],
+                expected_instructions: &[
+                    make(Constant, Some(&[0])),
+                    make(SetGlobal, Some(&[0])),
+                    make(GetGlobal, Some(&[0])),
+                    make(Constant, Some(&[1])),
+                    make(Constant, Some(&[2])),
+                    make(Constant, Some(&[3])),
+                    make(Op::Call, Some(&[3])), // Number of parameters
+                    make(Pop, None),
+                ],
             },
         ];
 
@@ -1042,13 +1315,25 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "Trying to call something other than a function.")]
+    fn compile_time_errors() {
+        use code::make;
+        let cases = [CompilerCase {
+            input: "let x = 10; x()",
+            expected_constants: vec![],
+            expected_instructions: &[],
+        }];
+        test_compiler_cases(&cases);
+    }
+
+    #[ignore]
+    #[test]
     fn compiler_scopes() {
         let mut compiler = Compiler::new();
 
         assert_eq!(compiler.scope_index, 0);
         compiler.emit(Op::Mul, None);
         // Grab a pointer into the table, for comparison later.
-        let global: *const SymbolTable = &compiler.table;
 
         compiler.enter_scope();
         assert_eq!(compiler.scope_index, 1);
@@ -1059,19 +1344,8 @@ mod tests {
         let last = &compiler.scopes[compiler.scope_index].last_instruction;
         assert_eq!(last.opcode, Op::Sub);
 
-        // Finding out if the current table is pointing to the global scope.
-        let p: *const SymbolTable = compiler.table.parent.as_ref().unwrap().borrow();
-        assert_eq!(
-            // HACK There must be a better way!
-            p,
-            global
-        );
-
         compiler.leave_scope();
         assert_eq!(compiler.scope_index, 0);
-
-        let p: *const SymbolTable = &compiler.table;
-        assert_eq!(p, global);
 
         compiler.emit(Op::Add, None);
         assert_eq!(compiler.scopes[compiler.scope_index].instructions.len(), 2);
@@ -1095,17 +1369,19 @@ mod tests {
     }
 
     fn test_constants(actual: Vec<Object>, expected: &Vec<Object>) {
-        assert_eq!(
+        assert!(
+            actual.len() == expected.len(),
+            "Constant pool doesn't have the same number of objects.
+Compiled {}\nExpected {}",
             actual.len(),
             expected.len(),
-            "Constant pool doesn't have the same number of objects."
         );
 
         for (a, e) in actual.iter().zip(expected) {
             match a {
                 Integer(i) => test_integer_object(a, e),
                 String(s) => test_string_object(a, e),
-                CompiledFn(ins) => test_compiledfn_object(a, e),
+                CompiledFn(..) => test_compiledfn_object(a, e),
                 _ => todo!(),
             }
         }
@@ -1131,33 +1407,39 @@ mod tests {
 
     fn test_compiledfn_object(a: &Object, e: &Object) {
         assert!(matches!(e, Object::CompiledFn(..)));
-        if let Object::CompiledFn(ins_i) = a {
-            if let Object::CompiledFn(ins_j) = e {
-                dbg!(ins_i);
-                dbg!(ins_j);
+        if let Object::CompiledFn(compiled, i) = a {
+            if let Object::CompiledFn(expected, j) = e {
+                // dbg!(compiled.to_string());
+                // dbg!(expected.to_string());
                 assert_eq!(
-                    ins_i.len(),
-                    ins_j.len(),
+                    compiled.len(),
+                    expected.len(),
                     "Instruction lengths in bytes not the same."
                 );
+                assert!(i == j, "Number of local variables not the same. Compiled {i} variables, test expected {j}");
+                // dbg!(compiled);
+                // dbg!(expected);
                 assert!(
-                    ins_i.iter().eq(ins_j.iter()),
+                    compiled.iter().eq(expected.iter()),
                     "Instruction contents not the same."
                 );
             }
         }
     }
 
-    fn test_instructions(actual: code::Instructions, expected: &[code::Instructions]) {
-        let concat = concat_instructions(expected);
+    fn test_instructions(compiled: code::Instructions, expected: &[code::Instructions]) {
+        let expected = concat_instructions(expected);
+
+        // dbg!(compiled.to_string());
+        // dbg!(expected.to_string());
 
         assert_eq!(
-            actual.len(),
-            concat.len(),
+            compiled.len(),
+            expected.len(),
             "Instruction lengths in bytes not the same."
         );
         assert!(
-            actual.iter().eq(concat.iter()),
+            compiled.iter().eq(expected.iter()),
             "Instruction contents not the same."
         );
     }

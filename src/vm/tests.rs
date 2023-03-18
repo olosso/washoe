@@ -4,7 +4,7 @@ mod vm_tests {
     use crate::compiler::Compiler;
     use crate::object::Object;
     use crate::object::Object::*;
-    use crate::vm::globals::Globals;
+    use crate::vm::globals::Objects;
     use crate::vm::stack::Stack;
     use crate::vm::vm::VM;
 
@@ -22,7 +22,7 @@ mod vm_tests {
             assert!(matches!(a, Object::Integer(..)));
             if let Object::Integer(i) = a {
                 if let Object::Integer(j) = e {
-                    assert_eq!(i, j);
+                    assert!(i == j, "VM evaluated to {i}, but test expectation was {j}",);
                 }
             }
         }
@@ -62,8 +62,8 @@ mod vm_tests {
 
         pub fn test_hashmap_object(a: &Object, e: &Object) {
             assert!(matches!(a, Object::HashMap(_)));
-            dbg!(a);
-            dbg!(e);
+            // dbg!(a);
+            // dbg!(e);
             if let Object::HashMap(hm_i) = a {
                 if let Object::HashMap(hm_j) = e {
                     assert!(hm_i == hm_j)
@@ -83,9 +83,10 @@ mod vm_tests {
                 // Generation
                 let mut compiler = Compiler::new();
                 compiler.compile(program);
-                let mut globals = Globals::new();
+                let mut globals = Objects::new();
+                let mut locals = Objects::new();
                 let mut stack = Stack::new();
-                let mut vm = VM::new(compiler.bytecode(), &mut globals, &mut stack);
+                let mut vm = VM::new(compiler.bytecode(), &mut globals, &mut locals, &mut stack);
                 vm.run();
 
                 // Confirmation
@@ -394,25 +395,25 @@ mod vm_tests {
                 },
                 VMCase {
                     input: "let one = func() { 1; };
-let two = func() { 2; };
-one() + two()",
+                let two = func() { 2; };
+                one() + two()",
                     expected: Integer(3),
                 },
                 VMCase {
                     input: "let a = func() { 1; };
-let b = func() { a() + 1; };
-let c = func() { b() + 1; };
-c();",
+                let b = func() { a() + 1; };
+                let c = func() { b() + 1; };
+                c();",
                     expected: Integer(3),
                 },
                 VMCase {
                     input: "let ret = func() { return 99; 100; };
-ret();",
+                ret();",
                     expected: Integer(99),
                 },
                 VMCase {
                     input: "let ret = func() { return 99; return 100; };
-ret();",
+                ret();",
                     expected: Integer(99),
                 },
                 VMCase {
@@ -421,12 +422,120 @@ ret();",
                 },
                 VMCase {
                     input: "let returnsOne = func() { 1; };
-let returnsOneReturner = func() { returnsOne; };
-returnsOneReturner()();
-",
+                let returnsOneReturner = func() { returnsOne; };
+                returnsOneReturner()();
+                ",
                     expected: Integer(1),
                 },
             ];
+
+            test_vm_run(&cases);
+        }
+
+        #[test]
+        fn test_function_calls_args() {
+            let cases = [
+                VMCase {
+                    input: "func(a) { a }(1)",
+                    expected: Integer(1),
+                },
+                VMCase {
+                    input: "let foo = func(a, b) { a + b }; foo(7, 8)",
+                    expected: Integer(15),
+                },
+                VMCase {
+                    input: "let foo = func(a, b) { let z = 10; a + b + z }; foo(7, 8)",
+                    expected: Integer(25),
+                },
+            ];
+
+            test_vm_run(&cases);
+        }
+
+        #[test]
+        fn local_variables() {
+            let cases = [
+                VMCase {
+                    input: "
+                let a = 0;
+                let foo = func() {
+                    let a = 1;
+                    let b = 2;
+                    a + b
+                };
+                foo()
+                ",
+                    expected: Integer(3),
+                },
+                VMCase {
+                    input: "
+                            let a = 10;
+                            let foo = func() {
+                                let b = 2;
+                                a + b
+                            };
+                            foo()
+                            ",
+                    expected: Integer(12),
+                },
+                VMCase {
+                    input: "
+                let f1 = func() { let foobar = 100; foobar };
+                let f2 = func() { let foobar = 200; foobar };
+                f1() + f2()
+                                ",
+                    expected: Integer(300),
+                },
+                VMCase {
+                    input: "
+                let glob = 1;
+                let f1 = func() { let foobar = 1; foobar - glob };
+                let f2 = func() { let foobar = 1; foobar + glob};
+                f1() + f2()
+                                ",
+                    expected: Integer(2),
+                },
+            ];
+
+            test_vm_run(&cases);
+        }
+
+        #[test]
+        fn globals_locals_and_params() {
+            let cases = [VMCase {
+                input: "
+    let global_num = 10;
+
+    let sum = func(a, b) {
+        let c = a + b;
+        c + global_num;
+    };
+
+    let outer = func() {
+        sum(1, 2) + sum(3, 4) + global_num;
+    };
+
+    outer() + global_num;
+                        ",
+                expected: Integer(50),
+            }];
+
+            test_vm_run(&cases);
+        }
+
+        #[ignore]
+        #[test]
+        fn closures() {
+            let cases = [VMCase {
+                input: "
+            let foo = func() {
+                let bar = func() { 1; };
+                bar
+            };
+            foo()()
+            ",
+                expected: Integer(1),
+            }];
 
             test_vm_run(&cases);
         }
