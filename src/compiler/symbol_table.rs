@@ -11,6 +11,8 @@ use std::rc::Rc;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Global;
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Builtin;
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Local;
 
 /*
@@ -22,6 +24,7 @@ pub struct Symbol {
     pub name: String,
     pub index: u32,
     pub global: bool,
+    pub builtin: bool,
 }
 
 /*
@@ -50,6 +53,7 @@ impl SymbolTable<Global> {
             name: name.to_string(),
             index: self.num_definitions,
             global: true,
+            builtin: false,
         };
         self.store.insert(name.to_string(), symbol.clone());
         self.num_definitions += 1;
@@ -72,6 +76,7 @@ impl SymbolTable<Local> {
             name: name.to_string(),
             index: self.num_definitions,
             global: false,
+            builtin: false,
         };
         self.store.insert(name.to_string(), symbol.clone());
         self.num_definitions += 1;
@@ -79,6 +84,32 @@ impl SymbolTable<Local> {
             self.num_params += 1;
         }
         symbol
+    }
+}
+
+/// Note that SymbolTable<Builtin> does not implement define unlike the other two SymbolTables!
+/// The type system allows for this type of code structures.
+impl SymbolTable<Builtin> {
+    pub fn builtins() -> Self {
+        let mut store = HashMap::new();
+        for (i, builtin) in crate::object::Builtins::names().iter().enumerate() {
+            store.insert(
+                builtin.to_string(),
+                Symbol {
+                    name: builtin.to_string(),
+                    index: i as u32, // This is the index that should appear in Op::GetBuiltin as an operand.
+                    global: false,
+                    builtin: true,
+                },
+            );
+        }
+
+        SymbolTable {
+            store,
+            num_definitions: 0,
+            num_params: 0,
+            scope: PhantomData,
+        }
     }
 }
 
@@ -107,6 +138,7 @@ impl<T> DerefMut for SymbolTable<T> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProgSymbols {
     globals: SymbolTable<Global>,
+    builtins: SymbolTable<Builtin>,
     locals: Vec<Vec<SymbolTable<Local>>>,
     local_stack_index: usize,
     local_frame_index: usize,
@@ -118,6 +150,7 @@ impl ProgSymbols {
     pub fn new() -> Self {
         ProgSymbols {
             globals: SymbolTable::global(),
+            builtins: SymbolTable::builtins(),
             locals: Vec::new(),
             local_stack_index: 0,
             local_frame_index: 0,
@@ -160,7 +193,9 @@ impl ProgSymbols {
     }
 
     pub fn resolve(&self, name: &str) -> Option<&Symbol> {
-        self.resolve_locals(name).or(self.resolve_globals(name))
+        self.resolve_builtins(name)
+            .or(self.resolve_locals(name))
+            .or(self.resolve_globals(name))
     }
 
     fn resolve_locals(&self, name: &str) -> Option<&Symbol> {
@@ -180,6 +215,13 @@ impl ProgSymbols {
 
     fn resolve_globals(&self, name: &str) -> Option<&Symbol> {
         match self.globals.resolve(name) {
+            None => None,
+            symbol => symbol,
+        }
+    }
+
+    fn resolve_builtins(&self, name: &str) -> Option<&Symbol> {
+        match self.builtins.resolve(name) {
             None => None,
             symbol => symbol,
         }
@@ -231,6 +273,7 @@ mod tests {
                     name: "a".to_string(),
                     index: 0,
                     global: true,
+                    builtin: false,
                 },
             ),
             (
@@ -239,6 +282,7 @@ mod tests {
                     name: "b".to_string(),
                     index: 1,
                     global: true,
+                    builtin: false,
                 },
             ),
         ]);
@@ -259,6 +303,7 @@ mod tests {
                     name: "a".to_string(),
                     index: 0,
                     global: true,
+                    builtin: false,
                 },
             ),
             (
@@ -267,6 +312,7 @@ mod tests {
                     name: "b".to_string(),
                     index: 1,
                     global: true,
+                    builtin: false,
                 },
             ),
         ]);
@@ -289,6 +335,7 @@ mod tests {
                     name: "a".to_string(),
                     index: 0,
                     global: true,
+                    builtin: false,
                 },
             ),
             (
@@ -297,6 +344,7 @@ mod tests {
                     name: "b".to_string(),
                     index: 1,
                     global: true,
+                    builtin: false,
                 },
             ),
             (
@@ -305,6 +353,7 @@ mod tests {
                     name: "c".to_string(),
                     index: 0,
                     global: false,
+                    builtin: false,
                 },
             ),
             (
@@ -313,6 +362,7 @@ mod tests {
                     name: "d".to_string(),
                     index: 1,
                     global: false,
+                    builtin: false,
                 },
             ),
         ]);
@@ -342,6 +392,7 @@ mod tests {
                     name: "a".to_string(),
                     index: 0,
                     global: true,
+                    builtin: false,
                 },
             ),
             (
@@ -350,6 +401,7 @@ mod tests {
                     name: "b".to_string(),
                     index: 1,
                     global: true,
+                    builtin: false,
                 },
             ),
             (
@@ -358,6 +410,7 @@ mod tests {
                     name: "c".to_string(),
                     index: 0,
                     global: false,
+                    builtin: false,
                 },
             ),
             (
@@ -366,6 +419,7 @@ mod tests {
                     name: "d".to_string(),
                     index: 1,
                     global: false,
+                    builtin: false,
                 },
             ),
         ]);
@@ -377,6 +431,7 @@ mod tests {
                     name: "a".to_string(),
                     index: 0,
                     global: true,
+                    builtin: false,
                 },
             ),
             (
@@ -385,6 +440,7 @@ mod tests {
                     name: "b".to_string(),
                     index: 1,
                     global: true,
+                    builtin: false,
                 },
             ),
             (
@@ -393,6 +449,7 @@ mod tests {
                     name: "e".to_string(),
                     index: 0,
                     global: true,
+                    builtin: false,
                 },
             ),
             (
@@ -401,6 +458,7 @@ mod tests {
                     name: "f".to_string(),
                     index: 1,
                     global: true,
+                    builtin: false,
                 },
             ),
         ]);

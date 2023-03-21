@@ -120,10 +120,11 @@ impl<'stack, 'objects> VM<'stack, 'objects> {
      */
     pub fn run(&mut self) {
         while self.current_frame().ip < self.current_instructions().len() {
-            // println!(
-            //     "INST.PTR.: Current instruction pointer {}",
-            //     self.current_frame().ip
-            // );
+            println!(
+                "INST.PTR.: Current instruction pointer {}",
+                self.current_frame().ip
+            );
+
             // println!("INSTRUCTIONS:\n{}", self.current_instructions());
             // println!("STACK.PTR.: Current stack pointer {}", self.sp);
             // println!("STACK:\n{}", self.stack);
@@ -137,6 +138,24 @@ impl<'stack, 'objects> VM<'stack, 'objects> {
             match op {
                 Op::Pop => {
                     self.pop();
+                }
+                Op::Null => {
+                    self.push(Object::Null);
+                }
+                Op::True | Op::False => {
+                    if op == Op::True {
+                        self.push(Object::Boolean(true))
+                    } else {
+                        self.push(Object::Boolean(false))
+                    }
+                }
+                Op::Constant => {
+                    // Read the index of the constant from the operand for Op::Constant.
+                    let const_index = read_uint16(self.current_instructions(), ip + 1);
+                    ip += 2;
+
+                    // Push the Object corresponding to the index onto the stack.
+                    self.push(self.constants[const_index as usize].clone());
                 }
                 Op::SetLocal => {
                     let local_index = read_uint8(self.current_instructions(), ip + 1) as usize;
@@ -189,16 +208,19 @@ impl<'stack, 'objects> VM<'stack, 'objects> {
                     };
                     self.push(object);
                 }
-                Op::Null => {
-                    self.push(Object::Null);
-                }
-                Op::Constant => {
-                    // Read the index of the constant from the operand for Op::Constant.
-                    let const_index = read_uint16(self.current_instructions(), ip + 1);
-                    ip += 2;
+                Op::GetBuiltin => {
+                    /*
+                     * 1. Resolve the right Builtin based on the operand.
+                     * 2. Push Object::Builtin on the stack.
+                     * 3. Op::Call takes care of the call.
+                     */
 
-                    // Push the Object corresponding to the index onto the stack.
-                    self.push(self.constants[const_index as usize].clone());
+                    let index = read_uint8(self.current_instructions(), ip + 1);
+                    ip += 1;
+
+                    // NOTE This unwrap should never fail, since the compiler was able to resolve the name.
+                    let builtin = Object::get_builtin_by_index(index as u8).unwrap();
+                    self.push(builtin);
                 }
                 /*
                  * Call will pop the Stack, assuming that the object there is a CompiledFunction.
@@ -212,6 +234,18 @@ impl<'stack, 'objects> VM<'stack, 'objects> {
 
                     // Calculate the position of the FunctionObject on the stack.
                     let bp = self.sp - num_params as usize - 1;
+
+                    // If the FunctionObject is a Builtin, then use the internal implementation.
+                    // The rest of this Op::Call is unneccessary.
+                    if matches!(self.stack[bp], Object::Builtin(..)) {
+                        let arg = &self.stack[bp + 1];
+                        let result = self.stack[bp].call(arg.clone());
+                        self.pop(); // Get the parameter off the Stack.
+                        self.pop(); // Get the builtin off the Stack.
+                        self.push(result); // Chuch the result on the Stack.
+                        self.update_ip(ip + 2); // Jump over the Op::Call.
+                        continue; // Go to the next instruction.
+                    }
 
                     // Get the FunctionObject
                     let func = self.stack[bp].clone();
@@ -269,13 +303,6 @@ impl<'stack, 'objects> VM<'stack, 'objects> {
                      * The +1 is there to jump over the operand of the OpCall.
                      */
                     ip = self.current_frame().ip + 1;
-                }
-                Op::True | Op::False => {
-                    if op == Op::True {
-                        self.push(Object::Boolean(true))
-                    } else {
-                        self.push(Object::Boolean(false))
-                    }
                 }
                 Op::BuildArray => {
                     let array_size = read_uint16(self.current_instructions(), ip + 1) as usize;
@@ -364,11 +391,6 @@ impl<'stack, 'objects> VM<'stack, 'objects> {
                     self.push(result);
                 }
                 Op::Add | Op::Sub | Op::Mul | Op::Div => {
-                    dbg!(&self.constants);
-                    dbg!(&self.current_instructions().to_string());
-                    dbg!(&self.sp);
-                    dbg!(&self.stack[..5]);
-
                     let right = self.pop().clone();
                     let left = self.pop().clone();
 

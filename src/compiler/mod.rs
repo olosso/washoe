@@ -6,8 +6,8 @@ use std::rc::Rc;
 use crate::ast::{self, Node};
 use crate::ast::{Expression, Statement};
 use crate::code::{self, read_uint16, Instructions, Op};
-use crate::object::Object;
 use crate::object::Object::*;
+use crate::object::{self, Object};
 use ast::Expression::*;
 use ast::Statement::*;
 
@@ -103,6 +103,11 @@ impl Compiler {
              * resolve each symbol.
              */
             Let(_, name, expr) => {
+                // Panic if trying to bind a name that is a builtin function.
+                if object::Builtins::names().contains(&name.to_string().as_str()) {
+                    panic!("Can't use the name of a builtin as a variable name.")
+                }
+
                 self.c_expression(expr);
                 let index;
                 if self.in_global_scope {
@@ -122,20 +127,18 @@ impl Compiler {
                 self.c_expression(expr);
                 self.emit(Op::Return, None);
             }
-            _ => todo!(),
         }
     }
 
     fn c_expression(&mut self, expr: &Expression) {
         match expr {
             Identifier(_, name) => {
-                let index;
                 if let Some(symbol) = self.symbols.resolve(name) {
-                    if symbol.global {
-                        index = symbol.index;
+                    if symbol.builtin {
+                        self.emit(Op::GetBuiltin, Some(&[symbol.index]));
+                    } else if symbol.global {
                         self.emit(Op::GetGlobal, Some(&[symbol.index]));
                     } else {
-                        index = symbol.index;
                         self.emit(Op::GetLocal, Some(&[symbol.index]));
                     }
                 } else {
@@ -1335,7 +1338,7 @@ mod tests {
                         make(GetBuiltin, Some(&[0])),
                         make(BuildArray, Some(&[0])),
                         make(Op::Call, Some(&[1])),
-                        make(Pop, None),
+                        make(Op::Return, None),
                     ]),
                     0,
                 )],
@@ -1347,10 +1350,22 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "Trying to call something other than a function.")]
-    fn compile_time_errors() {
+    fn non_function_call_crash() {
         use code::make;
         let cases = [CompilerCase {
             input: "let x = 10; x()",
+            expected_constants: vec![],
+            expected_instructions: &[],
+        }];
+        test_compiler_cases(&cases);
+    }
+
+    #[test]
+    #[should_panic(expected = "Can't use the name of a builtin as a variable name.")]
+    fn builtint_variable_name_crash() {
+        use code::make;
+        let cases = [CompilerCase {
+            input: "let len = 5;",
             expected_constants: vec![],
             expected_instructions: &[],
         }];
@@ -1448,8 +1463,8 @@ Compiled {}\nExpected {}",
                     "Instruction lengths in bytes not the same."
                 );
                 assert!(i == j, "Number of local variables not the same. Compiled {i} variables, test expected {j}");
-                // dbg!(compiled);
-                // dbg!(expected);
+                dbg!(compiled);
+                dbg!(expected);
                 assert!(
                     compiled.iter().eq(expected.iter()),
                     "Instruction contents not the same."

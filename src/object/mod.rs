@@ -364,12 +364,15 @@ impl Object {
     /// Everything else is true.
     ///
     pub fn as_bool(&self) -> bool {
-        match &self {
-            Object::Null | Object::Integer(0) | Object::Boolean(false) => false,
-            _ => true,
-        }
+        !matches!(
+            self,
+            Object::Null | Object::Integer(0) | Object::Boolean(false)
+        )
     }
 
+    /*
+     * @BUILTIN_HELPERS
+     */
     pub fn get_builtin_by_index(index: u8) -> Option<Object> {
         match index {
             0 => Self::get_builtin_by_name("len"),
@@ -385,6 +388,19 @@ impl Object {
             _ => None,
         }
     }
+
+    pub fn call(&self, arg: Self) -> Object {
+        match self {
+            Object::Builtin(_, f) => {
+                let res = f(arg);
+                match res {
+                    Ok(res) => res,
+                    Err(err) => panic!("{err}"),
+                }
+            }
+            _ => panic!(),
+        }
+    }
 }
 
 pub struct Builtins;
@@ -393,6 +409,7 @@ impl Builtins {
     const PUTS: &'static str = "puts";
 
     pub fn len(object: Object) -> Result<Object, EvalError> {
+        dbg!(&object);
         let len = match object {
             Object::Array(ref array) => array.len(),
             Object::String(ref string) => string.len(),

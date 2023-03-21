@@ -523,6 +523,38 @@ mod vm_tests {
             test_vm_run(&cases);
         }
 
+        #[test]
+        fn builtins() {
+            let cases = [
+                VMCase {
+                    input: r#"len("")"#,
+                    expected: Integer(0),
+                },
+                VMCase {
+                    input: r#"len("1")"#,
+                    expected: Integer(1),
+                },
+                VMCase {
+                    input: r#"len("hello")"#,
+                    expected: Integer(5),
+                },
+                VMCase {
+                    input: "len([])",
+                    expected: Integer(0),
+                },
+                VMCase {
+                    input: "len([1])",
+                    expected: Integer(1),
+                },
+                VMCase {
+                    input: "len([1, 2, 3])",
+                    expected: Integer(3),
+                },
+            ];
+
+            test_vm_run(&cases);
+        }
+
         #[ignore]
         #[test]
         fn closures() {
