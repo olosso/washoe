@@ -36,7 +36,7 @@ pub enum Object {
     Return(Box<Self>),
     HashMap(HashMap<Self, Self>),
     Function(Vec<Expression>, Statement, Environment),
-    Builtin(&'static str, fn(Vec<Self>) -> Result<Self, EvalError>),
+    Builtin(&'static str, fn(Self) -> Result<Self, EvalError>),
     CompiledFn(crate::code::Instructions, usize),
 }
 
@@ -219,7 +219,6 @@ impl Object {
                         .collect::<Vec<String>>()
                         .join(", "),
                     body.to_string(),
-                    // env.to_str()
                 )
             }
             Object::Builtin(s, f) => s.to_string(),
@@ -355,27 +354,34 @@ impl Object {
         }
     }
 
-    /*
-     * Booleans in this language are truthy: Every value can be coerced into
-     * a bool, and values are false:
-     * Boolean(false)
-     * None
-     * Integer(0)
-     *
-     * Everything else is true.
-     */
+    /// Every value can be evaluated as a bool.
+    ///
+    /// These values evaluate to false:
+    /// - Boolean(false)
+    /// - Integer(0)
+    /// - None
+    ///
+    /// Everything else is true.
+    ///
     pub fn as_bool(&self) -> bool {
         match &self {
-            Object::Boolean(b) => *b,
-            Object::Null | Object::Integer(0) => false,
+            Object::Null | Object::Integer(0) | Object::Boolean(false) => false,
             _ => true,
         }
     }
 
-    pub fn builtins(name: &str) -> Option<Object> {
+    pub fn get_builtin_by_index(index: u8) -> Option<Object> {
+        match index {
+            0 => Self::get_builtin_by_name("len"),
+            1 => Self::get_builtin_by_name("puts"),
+            _ => None,
+        }
+    }
+
+    pub fn get_builtin_by_name(name: &str) -> Option<Object> {
         match name {
             "len" => Some(Object::Builtin(Builtins::LEN, Builtins::len)),
-            "puts" => Some(Object::Builtin(Builtins::LEN, Builtins::puts)),
+            "puts" => Some(Object::Builtin(Builtins::PUTS, Builtins::puts)),
             _ => None,
         }
     }
@@ -383,26 +389,25 @@ impl Object {
 
 pub struct Builtins;
 impl Builtins {
-    const LEN: &str = "len";
-    const PUTS: &str = "puts";
+    const LEN: &'static str = "len";
+    const PUTS: &'static str = "puts";
 
-    pub fn len(os: Vec<Object>) -> Result<Object, EvalError> {
-        if !(os.len() == 1 && matches!(os[0], Object::String(..))) {
-            return Err(EvalError::new("Bad arguments to len".to_string()));
+    pub fn len(object: Object) -> Result<Object, EvalError> {
+        let len = match object {
+            Object::Array(ref array) => array.len(),
+            Object::String(ref string) => string.len(),
+            _ => {
+                return Err(EvalError::new(
+                    "len only supports Arrays and Strings.".to_string(),
+                ))
+            }
         };
-        let o = &os[0];
 
-        if let Object::String(s) = o {
-            Ok(Object::Integer(s.len() as i32))
-        } else {
-            panic!("This shouldn't happen.")
-        }
+        Ok(Object::Integer(len as i32))
     }
 
-    pub fn puts(os: Vec<Object>) -> Result<Object, EvalError> {
-        for o in os {
-            println!("{}", o.inspect())
-        }
+    pub fn puts(object: Object) -> Result<Object, EvalError> {
+        println!("{}", object.inspect());
         Ok(Object::Null)
     }
 

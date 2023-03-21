@@ -110,6 +110,7 @@ pub enum Op {
     Exit = 23,
     SetLocal = 24,
     GetLocal = 25,
+    GetBuiltin = 26,
 }
 
 impl fmt::Display for Op {
@@ -154,6 +155,7 @@ impl TryFrom<u8> for Op {
             23 => Self::Exit,
             24 => Self::SetLocal,
             25 => Self::GetLocal,
+            26 => Self::GetBuiltin,
             _ => return Err("No Opcode corresponding to byte found."),
         };
         Ok(code)
@@ -189,7 +191,7 @@ lazy_static! {
             Op::Constant,
             Definition {
                 name: "OpConstant",
-                operand_widths: &[2] // This means that the constant pool can have ~65000 Objects.
+                operand_widths: &[2] // The index of the operand in the ConstantPool.
             },
         ),
         (
@@ -279,15 +281,15 @@ lazy_static! {
         (
             Op::Jump,
             Definition {
-                name: "OpJump",
-                operand_widths: &[2]
+                name: "OpJump", // Unconditional jump. Used in the end of ConsequenceBlocks.
+                operand_widths: &[2] // The relative jump distance. Determines which instruction to jump to.
             }
         ),
         (
             Op::JumpMaybe,
             Definition {
-                name: "OpJumpMaybe",
-                operand_widths: &[2]
+                name: "OpJumpMaybe", // Conditional jump. Used in the start of branches.
+                operand_widths: &[2] // The relative jump distance. Determines which instruction to jump to.
             }
         ),
         (
@@ -301,28 +303,28 @@ lazy_static! {
             Op::GetGlobal,
             Definition {
                 name: "OpGetGlobal",
-                operand_widths: &[2]
+                operand_widths: &[2] // The index of the binding in GlobalScope.
             }
         ),
         (
             Op::SetGlobal,
             Definition {
                 name: "OpSetGlobal",
-                operand_widths: &[2]
+                operand_widths: &[2] // The index of the binding in GlobalScope.
             }
         ),
         (
             Op::BuildArray,
             Definition {
                 name: "OpBuildArray",
-                operand_widths: &[2]
+                operand_widths: &[2] // Number of elements.
             }
         ),
         (
             Op::BuildHashMap,
             Definition {
                 name: "OpBuildHashMap",
-                operand_widths: &[2]
+                operand_widths: &[2] // Number of key-value pairs.
             }
         ),
         (
@@ -336,7 +338,7 @@ lazy_static! {
             Op::Call,
             Definition {
                 name: "OpCall",
-                operand_widths: &[1]
+                operand_widths: &[1] // Number of call arguments.
             }
         ),
         (
@@ -357,27 +359,35 @@ lazy_static! {
             Op::SetLocal,
             Definition {
                 name: "OpSetLocal",
-                operand_widths: &[1]
+                operand_widths: &[1] // The index of the binding in LocalScope.
             }
         ),
         (
             Op::GetLocal,
             Definition {
                 name: "OpGetLocal",
-                operand_widths: &[1]
+                operand_widths: &[1] // The index of the binding in LocalScope.
+            }
+        ),
+        (
+            Op::GetBuiltin,
+            Definition {
+                name: "OpGetBuiltin",
+                operand_widths: &[1] // The index of the binding in BuiltinsScope.
             }
         ),
     ]);
 }
 
-/*
- * Produces Instructions by collecting bytes from the operands. Number of bytes collected
- * depends on the Opcode.
- * So for example (Opcode::Constant, [257])
- * Opcode::Constant corresponds to 0x0 = 0.
- * 256 = 0x00000101 => select only the 2 last bytes => 0x0101 => [1, 1]
- * Combined we get [0, 1, 1], where [1, 1] should be interpreted as big endian.
- */
+///
+/// Produces Instructions by collecting bytes from the operands.
+/// Number of bytes collected depends on the Opcode.
+///
+/// So for example (Opcode::Constant, [257])
+/// Opcode::Constant corresponds to 0x0 = 0.
+/// 256 = 0x00000101 => select only the 2 last bytes => 0x0101 => [1, 1]
+/// Combined we get [0, 1, 1], where [1, 1] should be interpreted as big endian.
+///
 pub fn make(op: Op, operands: Option<&[u32]>) -> Instructions {
     let def = DEFINITIONS.get(&op).expect("Bad Opcode to make.");
 
@@ -415,12 +425,11 @@ pub fn make(op: Op, operands: Option<&[u32]>) -> Instructions {
     Instructions::new(instruction)
 }
 
-/*
- * Interprets a array of bytes as an given Opcode.
- * Given a definition and bytes, transforms for example
- * (Opcode::Constant, [1, 1]) into (257, 2).
- * The 2 is useful when you need to know how much to advance in an array of multiple instructions.
- */
+///
+/// Interprets an array of bytes as Opcode.
+/// For example, given (Opcode::Constant, [1, 1]) return (257, 2).
+/// The 2 is useful when you need to know how much to advance in an array of multiple instructions.
+///
 pub fn read_operands(def: &Definition, ins: &[u8]) -> (Vec<u16>, usize) {
     let mut operands = vec![];
     let mut offset = 0;

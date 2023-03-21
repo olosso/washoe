@@ -145,8 +145,8 @@ fn eval_indexing(
     }
 
     Err(EvalError::new(
-        "This is not an Array or a HashMap 😠".to_string()),
-    )
+        "This is not an Array or a HashMap".to_string(),
+    ))
 }
 
 fn eval_call(
@@ -156,8 +156,10 @@ fn eval_call(
 ) -> Result<Object, EvalError> {
     let args = eval_expressions(args, env)?;
     if Builtins::names().contains(&ident.token_literal().as_str()) {
-        if let Object::Builtin(s, f) = Object::builtins(ident.token_literal().as_str()).unwrap() {
-            return f(args);
+        if let Object::Builtin(s, f) =
+            Object::get_builtin_by_name(ident.token_literal().as_str()).unwrap()
+        {
+            return f(args[0].clone());
         }
     }
 

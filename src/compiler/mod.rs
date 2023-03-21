@@ -1315,6 +1315,37 @@ mod tests {
     }
 
     #[test]
+    fn compile_builtins() {
+        use code::make;
+        let cases = [
+            CompilerCase {
+                input: "len([]);",
+                expected_constants: vec![],
+                expected_instructions: &[
+                    make(GetBuiltin, Some(&[0])),
+                    make(BuildArray, Some(&[0])),
+                    make(Op::Call, Some(&[1])),
+                    make(Pop, None),
+                ],
+            },
+            CompilerCase {
+                input: "func() { len([]); };",
+                expected_constants: vec![CompiledFn(
+                    Instructions::from_list(vec![
+                        make(GetBuiltin, Some(&[0])),
+                        make(BuildArray, Some(&[0])),
+                        make(Op::Call, Some(&[1])),
+                        make(Pop, None),
+                    ]),
+                    0,
+                )],
+                expected_instructions: &[make(Constant, Some(&[0])), make(Pop, None)],
+            },
+        ];
+        test_compiler_cases(&cases);
+    }
+
+    #[test]
     #[should_panic(expected = "Trying to call something other than a function.")]
     fn compile_time_errors() {
         use code::make;
