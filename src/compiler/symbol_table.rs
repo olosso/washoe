@@ -14,6 +14,8 @@ pub struct Global;
 pub struct Builtin;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Local;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Free;
 
 /*
  * @SYMBOL_TABLE::SYMBOL
@@ -25,6 +27,7 @@ pub struct Symbol {
     pub index: u32,
     pub global: bool,
     pub builtin: bool,
+    pub free: bool,
 }
 
 /*
@@ -33,7 +36,7 @@ pub struct Symbol {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SymbolTable<Scope = Global> {
     store: HashMap<String, Symbol>,
-    num_definitions: u32,
+    pub num_definitions: u32,
     pub num_params: u32,
     scope: PhantomData<Scope>,
 }
@@ -54,6 +57,7 @@ impl SymbolTable<Global> {
             index: self.num_definitions,
             global: true,
             builtin: false,
+            free: false,
         };
         self.store.insert(name.to_string(), symbol.clone());
         self.num_definitions += 1;
@@ -77,6 +81,7 @@ impl SymbolTable<Local> {
             index: self.num_definitions,
             global: false,
             builtin: false,
+            free: false,
         };
         self.store.insert(name.to_string(), symbol.clone());
         self.num_definitions += 1;
@@ -100,6 +105,7 @@ impl SymbolTable<Builtin> {
                     index: i as u32, // This is the index that should appear in Op::GetBuiltin as an operand.
                     global: false,
                     builtin: true,
+                    free: false,
                 },
             );
         }
@@ -110,6 +116,33 @@ impl SymbolTable<Builtin> {
             num_params: 0,
             scope: PhantomData,
         }
+    }
+}
+
+impl SymbolTable<Free> {
+    pub fn free() -> Self {
+        SymbolTable {
+            store: HashMap::new(),
+            num_definitions: 0,
+            num_params: 0,
+            scope: PhantomData,
+        }
+    }
+
+    pub fn define(&mut self, name: &str, param: bool) -> Symbol {
+        let symbol = Symbol {
+            name: name.to_string(),
+            index: self.num_definitions,
+            global: false,
+            builtin: false,
+            free: true,
+        };
+        self.store.insert(name.to_string(), symbol.clone());
+        self.num_definitions += 1;
+        if param {
+            self.num_params += 1;
+        }
+        symbol
     }
 }
 
@@ -140,10 +173,12 @@ pub struct ProgSymbols {
     globals: SymbolTable<Global>,
     builtins: SymbolTable<Builtin>,
     locals: Vec<Vec<SymbolTable<Local>>>,
+    free: Vec<Vec<SymbolTable<Free>>>,
     local_stack_index: usize,
     local_frame_index: usize,
     locals_count: u32,
     globals_count: u32,
+    free_count: u32,
 }
 
 impl ProgSymbols {
@@ -152,15 +187,18 @@ impl ProgSymbols {
             globals: SymbolTable::global(),
             builtins: SymbolTable::builtins(),
             locals: Vec::new(),
+            free: Vec::new(),
             local_stack_index: 0,
             local_frame_index: 0,
             locals_count: 0,
             globals_count: 0,
+            free_count: 0,
         }
     }
 
     pub fn new_stack(&mut self) {
         self.locals.push(vec![]);
+        self.free.push(vec![]);
         self.local_stack_index = self.locals.len() - 1;
     }
 
@@ -169,11 +207,13 @@ impl ProgSymbols {
         if self.locals[self.local_stack_index].is_empty() {
             // Add first local SymbolTable to the SymbolTable Stack.
             self.locals[self.local_stack_index].push(SymbolTable::local(0));
+            self.free[self.local_stack_index].push(SymbolTable::free());
         } else {
             // Add new local SymbolTable to existing Stack.
             let n_locals =
                 self.locals[self.local_stack_index][self.local_frame_index].num_definitions;
-            self.locals[self.local_stack_index].push(SymbolTable::local(n_locals));
+            self.locals[self.local_stack_index].push(SymbolTable::local(0));
+            self.free[self.local_stack_index].push(SymbolTable::free());
         }
         // Keep track of how deep into the stack we are.
         self.local_frame_index = self.locals[self.local_stack_index].len() - 1;
@@ -192,13 +232,26 @@ impl ProgSymbols {
         self.locals.get(self.local_stack_index)
     }
 
-    pub fn resolve(&self, name: &str) -> Option<&Symbol> {
+    pub fn current_local_frame(&mut self) -> &mut SymbolTable<Local> {
+        &mut self.locals[self.local_stack_index][self.local_frame_index]
+    }
+
+    pub fn resolve(&self, name: &str) -> Option<Symbol> {
         self.resolve_builtins(name)
             .or(self.resolve_locals(name))
+            .or(self.resolve_frees(name))
             .or(self.resolve_globals(name))
     }
 
-    fn resolve_locals(&self, name: &str) -> Option<&Symbol> {
+    fn resolve_locals(&self, name: &str) -> Option<Symbol> {
+        self.locals
+            .get(self.local_stack_index)?
+            .get(self.local_frame_index)?
+            .resolve(name)
+            .cloned()
+    }
+
+    fn resolve_frees(&self, name: &str) -> Option<Symbol> {
         for stack in self
             .current_local_stack()?
             .iter()
@@ -207,23 +260,30 @@ impl ProgSymbols {
         {
             match stack.resolve(name) {
                 None => continue,
-                symbol => return symbol,
+                symbol => {
+                    let symbol = symbol.cloned().map(|mut x| {
+                        x.index = self.num_frees();
+                        x.free = true;
+                        x
+                    });
+                    return symbol;
+                }
             }
         }
         None
     }
 
-    fn resolve_globals(&self, name: &str) -> Option<&Symbol> {
+    fn resolve_globals(&self, name: &str) -> Option<Symbol> {
         match self.globals.resolve(name) {
             None => None,
-            symbol => symbol,
+            symbol => symbol.cloned(),
         }
     }
 
-    fn resolve_builtins(&self, name: &str) -> Option<&Symbol> {
+    fn resolve_builtins(&self, name: &str) -> Option<Symbol> {
         match self.builtins.resolve(name) {
             None => None,
-            symbol => symbol,
+            symbol => symbol.cloned(),
         }
     }
 
@@ -237,6 +297,34 @@ impl ProgSymbols {
 
     pub fn local_frame(&self) -> &SymbolTable<Local> {
         &self.locals[self.local_stack_index][self.local_frame_index]
+    }
+
+    pub fn free_variables(&self) -> SymbolTable<Local> {
+        let mut st = SymbolTable::local(0);
+        for (key, val) in self.locals[self.local_stack_index][self.local_frame_index].iter() {
+            if val.free {
+                let mut val = val.clone();
+                val.free = false;
+                st.insert(key.to_owned(), val);
+            }
+        }
+        st
+    }
+
+    pub fn num_locals(&self) -> usize {
+        let n: usize = self.locals[self.local_stack_index][self.local_frame_index]
+            .iter()
+            .map(|(key, val)| if !val.free { 1usize } else { 0usize })
+            .sum();
+
+        n - self.local_frame().num_params as usize
+    }
+
+    pub fn num_frees(&self) -> u32 {
+        self.locals[self.local_stack_index][self.local_frame_index]
+            .iter()
+            .map(|(key, val)| if val.free { 1u32 } else { 0u32 })
+            .sum()
     }
 
     pub fn define_global(&mut self, name: &str) -> u32 {
@@ -274,6 +362,7 @@ mod tests {
                     index: 0,
                     global: true,
                     builtin: false,
+                    free: false,
                 },
             ),
             (
@@ -283,6 +372,7 @@ mod tests {
                     index: 1,
                     global: true,
                     builtin: false,
+                    free: false,
                 },
             ),
         ]);
@@ -304,6 +394,7 @@ mod tests {
                     index: 0,
                     global: true,
                     builtin: false,
+                    free: false,
                 },
             ),
             (
@@ -313,6 +404,7 @@ mod tests {
                     index: 1,
                     global: true,
                     builtin: false,
+                    free: false,
                 },
             ),
         ]);
@@ -321,8 +413,8 @@ mod tests {
         symbols.define_global("a");
         symbols.define_global("b");
 
-        assert_eq!(symbols.resolve("a").unwrap(), expected.get("a").unwrap());
-        assert_eq!(symbols.resolve("b").unwrap(), expected.get("b").unwrap());
+        assert_eq!(symbols.resolve("a").unwrap(), *expected.get("a").unwrap());
+        assert_eq!(symbols.resolve("b").unwrap(), *expected.get("b").unwrap());
     }
 
     #[ignore]
@@ -336,6 +428,7 @@ mod tests {
                     index: 0,
                     global: true,
                     builtin: false,
+                    free: false,
                 },
             ),
             (
@@ -345,6 +438,7 @@ mod tests {
                     index: 1,
                     global: true,
                     builtin: false,
+                    free: false,
                 },
             ),
             (
@@ -354,6 +448,7 @@ mod tests {
                     index: 0,
                     global: false,
                     builtin: false,
+                    free: false,
                 },
             ),
             (
@@ -363,6 +458,7 @@ mod tests {
                     index: 1,
                     global: false,
                     builtin: false,
+                    free: false,
                 },
             ),
         ]);
@@ -375,11 +471,11 @@ mod tests {
         symbols.define_local("d");
 
         for (key, val) in symbols.globals().iter() {
-            assert_eq!(symbols.resolve(key).unwrap(), expected.get(key).unwrap());
+            assert_eq!(symbols.resolve(key).unwrap(), *expected.get(key).unwrap());
         }
 
         for (key, val) in symbols.local_frame().iter() {
-            assert_eq!(symbols.resolve(key).unwrap(), expected.get(key).unwrap());
+            assert_eq!(symbols.resolve(key).unwrap(), *expected.get(key).unwrap());
         }
     }
 
@@ -393,6 +489,7 @@ mod tests {
                     index: 0,
                     global: true,
                     builtin: false,
+                    free: false,
                 },
             ),
             (
@@ -402,6 +499,7 @@ mod tests {
                     index: 1,
                     global: true,
                     builtin: false,
+                    free: false,
                 },
             ),
             (
@@ -411,6 +509,7 @@ mod tests {
                     index: 0,
                     global: false,
                     builtin: false,
+                    free: false,
                 },
             ),
             (
@@ -420,6 +519,7 @@ mod tests {
                     index: 1,
                     global: false,
                     builtin: false,
+                    free: false,
                 },
             ),
         ]);
@@ -432,6 +532,7 @@ mod tests {
                     index: 0,
                     global: true,
                     builtin: false,
+                    free: false,
                 },
             ),
             (
@@ -441,6 +542,7 @@ mod tests {
                     index: 1,
                     global: true,
                     builtin: false,
+                    free: false,
                 },
             ),
             (
@@ -450,6 +552,7 @@ mod tests {
                     index: 0,
                     global: true,
                     builtin: false,
+                    free: false,
                 },
             ),
             (
@@ -459,6 +562,7 @@ mod tests {
                     index: 1,
                     global: true,
                     builtin: false,
+                    free: false,
                 },
             ),
         ]);

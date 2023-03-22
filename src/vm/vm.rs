@@ -17,29 +17,30 @@ use super::stack::{Stack, STACK_SIZE};
 /// Struct representing a Stack Frame (AKA Call Frame or Activation Record)
 #[derive(Debug)]
 struct Frame {
-    func: Object, // This is always a Compiled Function that is currently executing.
-    ip: usize,    // The instruction pointer in the current frame.
-    bp: usize,    // Base pointer for of current Frame
+    closure: Object, // This is always a Compiled Function that is currently executing.
+    ip: usize,       // The instruction pointer in the current frame.
+    bp: usize,       // Base pointer for of current Frame
 }
 
 impl Frame {
     fn new(obj: Object, bp: usize) -> Self {
-        assert!(matches!(obj, Object::CompiledFn(..)));
+        assert!(matches!(obj, Object::Closure(..)));
         Self {
-            func: obj,
+            closure: obj,
             ip: 0,
             bp,
         }
     }
 
     fn instructions(&self) -> &Instructions {
+        self.closure.instructions().unwrap()
         // Thank God that Rust allows me to do this.
-        if let Object::CompiledFn(ref instructions, _) = self.func {
-            instructions
-        } else {
-            // I swear this should never happen.
-            unreachable!()
-        }
+        // if let Object::Closure(compiled_fn, _) = self.closure {
+        //     compiled_fn.instructions().unwrap()
+        // } else {
+        //     // I swear this should never happen.
+        //     unreachable!()
+        // }
     }
 
     #[allow(non_snake_case)]
@@ -72,7 +73,10 @@ impl<'stack, 'objects> VM<'stack, 'objects> {
         locals: &'objects mut Objects,
         stack: &'stack mut Stack,
     ) -> Self {
-        let main = Object::CompiledFn(bytecode.instructions, 0);
+        let main = Object::Closure(
+            Box::new(Object::CompiledFn(bytecode.instructions, 0)),
+            Vec::new(),
+        );
         let main_frame = Frame::new(main, 0);
         let mut frames = vec![main_frame];
 
@@ -156,6 +160,20 @@ impl<'stack, 'objects> VM<'stack, 'objects> {
 
                     // Push the Object corresponding to the index onto the stack.
                     self.push(self.constants[const_index as usize].clone());
+                }
+                Op::Closure => {
+                    // Read the index of the function from the first operand.
+                    let const_index = read_uint16(self.current_instructions(), ip + 1);
+                    ip += 2;
+                    // Read the number of free variables from the second operand.
+                    let _ = read_uint8(self.current_instructions(), ip + 3);
+                    ip += 1;
+
+                    // Push the Object corresponding to the index onto the stack.
+                    self.push(Object::Closure(
+                        Box::new(self.constants[const_index as usize].clone()),
+                        Vec::new(),
+                    ));
                 }
                 Op::SetLocal => {
                     let local_index = read_uint8(self.current_instructions(), ip + 1) as usize;
@@ -247,12 +265,12 @@ impl<'stack, 'objects> VM<'stack, 'objects> {
                         continue; // Go to the next instruction.
                     }
 
-                    // Get the FunctionObject
+                    // Get the Closure
                     let func = self.stack[bp].clone();
 
                     // Get the number of local variables.
                     let local_count = match func {
-                        Object::CompiledFn(_, count) => count,
+                        Object::Closure(ref compiled_fn, _) => compiled_fn.locals_count().unwrap(),
                         _ => unreachable!(),
                     };
 

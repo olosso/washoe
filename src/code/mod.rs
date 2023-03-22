@@ -67,6 +67,9 @@ impl fmt::Display for Instructions {
                 1 => {
                     format!("{} {}", def.name, operands[0])
                 }
+                2 => {
+                    format!("{} {} {}", def.name, operands[0], operands[1])
+                }
                 _ => unreachable!(),
             };
             let msg = format!("{i:0>4} {msg}\n");
@@ -111,6 +114,8 @@ pub enum Op {
     SetLocal = 24,
     GetLocal = 25,
     GetBuiltin = 26,
+    Closure = 27,
+    GetFree = 28,
 }
 
 impl fmt::Display for Op {
@@ -156,6 +161,8 @@ impl TryFrom<u8> for Op {
             24 => Self::SetLocal,
             25 => Self::GetLocal,
             26 => Self::GetBuiltin,
+            27 => Self::Closure,
+            28 => Self::GetFree,
             _ => return Err("No Opcode corresponding to byte found."),
         };
         Ok(code)
@@ -376,6 +383,23 @@ lazy_static! {
                 operand_widths: &[1] // The index of the binding in BuiltinsScope.
             }
         ),
+        (
+            Op::Closure,
+            Definition {
+                name: "OpClosure",
+                operand_widths: &[
+                    2, // Index of CompiledFunc in the ConstantPool
+                    1  // Number of FreeVariables
+                ]
+            }
+        ),
+        (
+            Op::GetFree,
+            Definition {
+                name: "OpGetFree",
+                operand_widths: &[1] // Index of the FreeVariable of a Closure
+            }
+        ),
     ]);
 }
 
@@ -490,6 +514,11 @@ mod tests {
                 operands: Some(&[100]),
                 expected: &[Op::SetLocal as u8, 100],
             },
+            Case {
+                op: Op::Closure,
+                operands: Some(&[10, 1]),
+                expected: &[Op::Closure as u8, 0, 10, 1],
+            },
         ];
 
         for case in cases {
@@ -512,6 +541,7 @@ mod tests {
             &make(Constant, Some(&[65535]))[..],
             &make(Add, None)[..],
             &make(Mul, None)[..],
+            &make(Closure, Some(&[10, 1]))[..],
         ];
 
         let expected = "0000 OpConstant 1
@@ -519,6 +549,7 @@ mod tests {
 0006 OpConstant 65535
 0009 OpAdd
 0010 OpMul
+0011 OpClosure 10 1
 ";
 
         let concatted = Instructions::new(instructions.concat());
@@ -548,6 +579,11 @@ mod tests {
                 op: SetLocal,
                 operands: Some(&[100]),
                 bytes_read: 1,
+            },
+            Case {
+                op: Closure,
+                operands: Some(&[65535, 0]),
+                bytes_read: 3,
             },
         ];
 

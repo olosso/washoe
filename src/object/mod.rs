@@ -1,5 +1,6 @@
 #![allow(non_camel_case_types)]
 use crate::ast::{Body, Expression, Node, Params, Statement};
+use crate::code::Instructions;
 use crate::evaluator::EvalError;
 use core::cmp::PartialEq;
 use std::default::Default;
@@ -21,6 +22,7 @@ pub enum Type {
     FUNCTION,
     BUILTIN,
     COMPILEDFN,
+    CLOSURE,
 }
 
 /*
@@ -38,6 +40,7 @@ pub enum Object {
     Function(Vec<Expression>, Statement, Environment),
     Builtin(&'static str, fn(Self) -> Result<Self, EvalError>),
     CompiledFn(crate::code::Instructions, usize),
+    Closure(Box<Self>, Vec<Self>),
 }
 
 impl Default for Object {
@@ -141,6 +144,9 @@ impl PartialEq for Object {
                     false
                 }
             }
+            Object::Closure(func, free_vars) => {
+                todo!()
+            }
         }
     }
 }
@@ -172,6 +178,7 @@ impl Clone for Object {
                 Self::HashMap(b)
             }
             Self::CompiledFn(ins, count) => Self::CompiledFn(ins.clone(), *count),
+            Self::Closure(ins, free_vars) => Self::Closure(ins.clone(), free_vars.clone()),
         }
     }
 }
@@ -191,6 +198,7 @@ impl Object {
             Object::Function(..) => Type::FUNCTION,
             Object::Builtin(..) => Type::BUILTIN,
             Object::CompiledFn(..) => Type::COMPILEDFN,
+            Object::Closure(..) => Type::CLOSURE,
         }
     }
 
@@ -232,6 +240,9 @@ impl Object {
             }
             Object::CompiledFn(ins, count) => {
                 format!("{ins}")
+            }
+            Object::Closure(func, free_vars) => {
+                format!("{}\n{:?}", func.inspect(), free_vars)
             }
         }
     }
@@ -333,6 +344,27 @@ impl Object {
     pub fn env(&self) -> Option<String> {
         match self {
             Object::Function(_, _, e) => Some(e.inspect()),
+            _ => None,
+        }
+    }
+
+    pub fn locals_count(&self) -> Option<usize> {
+        match self {
+            Object::CompiledFn(_, count) => Some(*count),
+            _ => None,
+        }
+    }
+
+    pub fn instructions(&self) -> Option<&Instructions> {
+        match self {
+            Object::Closure(compiled_fn, _) => Some(compiled_fn._instructions().unwrap()),
+            _ => None,
+        }
+    }
+
+    pub fn _instructions(&self) -> Option<&Instructions> {
+        match self {
+            Object::CompiledFn(instructions, _) => Some(instructions),
             _ => None,
         }
     }
